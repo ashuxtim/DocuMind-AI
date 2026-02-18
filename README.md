@@ -1,6 +1,6 @@
 # 🧠 DocuMind AI
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![Neo4j](https://img.shields.io/badge/Neo4j-008CC1?style=for-the-badge&logo=neo4j&logoColor=white)
 ![Qdrant](https://img.shields.io/badge/Qdrant-DC244C?style=for-the-badge&logo=qdrant&logoColor=white)
@@ -29,7 +29,7 @@ The system implements a **3-stage agentic workflow** (decompose → retrieve →
 → **Code-Assisted Math Reasoning**: Safe Python execution for quantitative questions from document context  
 → **RAGAS-Validated Quality**: Continuous evaluation of context precision, answer relevance, and faithfulness metrics  
 
-> *"DocuMind doesn't just retrieve—it reasons. By fusing vector semantics with graph topology and constraint validation, we achieve sub-5% hallucination rates on adversarial document QA tasks."*
+> *"DocuMind doesn't just retrieve—it reasons. By fusing vector semantics with graph topology and constraint validation, we achieve significantly reduced hallucination rates on adversarial document QA tasks."*
 
 ---
 
@@ -42,7 +42,7 @@ The system implements a **3-stage agentic workflow** (decompose → retrieve →
 > **Dual-Retrieval Hybrid Architecture**  
 > Qdrant vector search (384-dim sentence-transformers) + Neo4j graph traversal (3-hop entity relationships)
 
-> **Average Query Latency**: <800ms for complex multi-hop queries
+> **Optimized Query Latency**: Efficient retrieval for complex multi-hop queries
 
 > **Multi-Stage Agent Graph** 
 > LangGraph state machine with 4 core nodes: decompose_query → retrieve → generate → audit. Features a conditional feedback loop that routes failed audits back to the generator with explicit correction instructions.  
@@ -50,7 +50,7 @@ The system implements a **3-stage agentic workflow** (decompose → retrieve →
 > **Context Window Management**: Character-based semantic chunking with 2000-character limits
 
 > **Knowledge Graph Intelligence**  
-> NetworkX-powered relationship extraction from 100K+ document entities
+> LLM-powered relationship extraction from document entities
 
 > **Graph Statistics**: Dynamic entity classification with real-time subgraph querying
 
@@ -61,9 +61,9 @@ The system implements a **3-stage agentic workflow** (decompose → retrieve →
 | 🤖 LLM Stack | 🧠 Knowledge Layer | ⚡ AI Infrastructure |
 |-------------|-------------------|---------------------|
 | **Providers**: Ollama, vLLM, OpenAI (GPT-4), Gemini | **Vector Store**: Qdrant (dense retrieval) | **Framework**: LangGraph (agent orchestration) |
-| **Embeddings**: sentence-transformers | **Graph DB**: Neo4j (entity relationships) | **Evaluation**: RAGAS (context precision, faithfulness) |
+| **Embeddings**: sentence-transformers | **Graph DB**: Neo4j (entity relationships) | **Evaluation**: RAGAS (faithfulness, answer relevancy) |
 | **Router**: Dynamic provider selection | **Chunking**: Unstructured (title-based semantic splits) | **Tracing**: LangSmith (@traceable decorators) |
-| **Guardrails**: Constraint-based validation | **Indexing**: BM25 + vector hybrid search | **Tasks**: Celery + Redis (async processing) |
+| **Guardrails**: Constraint-based validation | **Indexing**: Dense Vector Retrieval (Qdrant) | **Tasks**: Celery + Redis (async processing) |
 
 ---
 
@@ -71,9 +71,9 @@ The system implements a **3-stage agentic workflow** (decompose → retrieve →
 
 | Component | Technology | Key Metrics |
 |-----------|-----------|-------------|
-| **Embedding Generation** | sentence-transformers | 384-dimensional embeddings, ~50ms/chunk |
+| **Embedding Generation** | sentence-transformers | 384-dimensional embeddings |
 | **Vector Retrieval** | Qdrant | Top-K semantic search with dynamic metadata filtering |
-| **Graph Traversal** | Neo4j Cypher | 3-hop relationship queries, sub-100ms |
+| **Graph Traversal** | Neo4j Cypher | 3-hop relationship queries |
 | **LLM Inference** | Multi-provider routing | OpenAI (GPT-4), Ollama (local), vLLM (optimized) |
 | **Document Ingestion** | Celery background tasks | Async processing with progress tracking |
 | **Constraint Checking** | Custom NLP + LLM validation | Predicate extraction, circular dependency detection |
@@ -100,7 +100,7 @@ sequenceDiagram
     participant LLM Provider
     participant Audit Node
     
-    User->>FastAPI: POST /query {question, context_depth}
+    User->>FastAPI: POST /query {question, history, selected_docs}
     FastAPI->>LangGraph Agent: Initialize AgentState
     
     LangGraph Agent->>Query Decomposer: decompose_query_node()
@@ -137,8 +137,8 @@ sequenceDiagram
         LLM Provider-->>Constraint Checker: Revised answer
     end
     
-    LangGraph Agent->>Audit Node: detect_fabricated_explanations()
-    Audit Node->>Audit Node: Verify sources explain contradictions
+    LangGraph Agent->>Audit Node: audit_node()
+    Audit Node->>Audit Node: Detect fabrications & check constraints
     
     alt Fabrications Detected
         Audit Node->>LangGraph Agent: Flag issues, decide_next_step()
@@ -158,11 +158,11 @@ The system employs a **multi-stage decomposition strategy** to handle complex qu
 
 → **Query Keyword Extraction**: `extract_query_entities()` uses an LLM to distill questions into an optimized array of 3-8 targeted search keywords, prioritizing proper nouns, financial terms, and temporal markers.  
 → **Sub-Question Generation**: `decompose_query_node()` breaks compound queries into atomic retrievable units  
-→ **Embedding Pipeline**: sentence-transformers generates 768-dim vectors with L2 normalization  
+→ **Embedding Pipeline**: sentence-transformers generates 384-dim vectors with L2 normalization  
 → **Hybrid Retrieval Strategy**:
   - **Dense Search**: Qdrant cosine similarity with Top-K retrieval and dynamic payload filtering
   - **Sparse Search**: Graph-based entity relationship traversal (1-3 hops via Cypher queries)
-  - **Fusion**: Graph context is explicitly extracted and prepended as priority knowledge (`--- RELEVANT GRAPH CONNECTIONS ---`) above reranked vector chunks to ensure the LLM processes symbolic relationships first.
+  - **Fusion**: Graph context is explicitly extracted and prepended as priority knowledge (`--- RELEVANT GRAPH CONNECTIONS ---`) to ensure the LLM processes symbolic relationships first.
 
 → **Context Optimization**:
   - **Chunking**: Title-based semantic splits via Unstructured library (max 2000 chars, soft split at 1800, combines under 500)
@@ -198,7 +198,6 @@ class LLMProvider:
 → **Output Parsing & Validation**:
   - **Structured Generation**: Pydantic models enforce response schemas
   - **Retry Logic**: Single-pass retry mechanism that injects specific audit violations back into the LLM context.
-  - **Guardrails**: `generate_with_guardrails()` enforces scope validation before accepting outputs
 
 #### **Knowledge Management**
 
@@ -252,7 +251,7 @@ CREATE CONSTRAINT org_name IF NOT EXISTS FOR (o:Organization) REQUIRE o.name IS 
 #### **Multi-Agent RAG Pipeline**
 
 **LangGraph State Machine Architecture**:
-  - **AgentState Schema**: `{query, sub_queries, retrieved_chunks, graph_data, answer, audit_log, constraints}`
+  - **AgentState Schema**: `{question, history, sub_queries, documents, generation, audit_feedback, retry_count, sources}`
   - **Node Functions**:
     - `decompose_query_node()`: Breaks complex questions into independently retrievable sub-queries.
     - `retrieve_node()`: Sequential multi-query retrieval with balanced result merging + graph context injection, followed by Cross-Encoder reranking.
@@ -262,7 +261,7 @@ CREATE CONSTRAINT org_name IF NOT EXISTS FOR (o:Organization) REQUIRE o.name IS 
 
 **Retrieval Strategies**:
   - **Dense Vector Search**: Qdrant with sentence-transformers embeddings (all-MiniLM-L6-v2, 384-dim)
-  - **Hybrid Fusion**: Weighted combination of vector similarity + graph proximity scores
+  - **Context Injection**: Graph context is prepended to vector results for LLM processing
   - **Iterative Refinement**: Audit failures trigger re-retrieval with adjusted parameters
 
 **Context Assembly Techniques**:
@@ -273,8 +272,7 @@ CREATE CONSTRAINT org_name IF NOT EXISTS FOR (o:Organization) REQUIRE o.name IS 
 **Guardrails & Validation**:
   - **Constraint Extraction**: `ConstraintChecker.extract_predicates()` parses logical rules from queries
   - **Consistency Verification**: Circular dependency detection, mutual exclusivity checks
-  - **Scope Validation**: `validate_scope_integrity()` ensures answers don't hallucinate beyond context
-  - **Retry Mechanism**: Max 3 regeneration attempts with constraint feedback
+  - **Retry Mechanism**: Single-shot retry with constraint feedback
 
 #### **LLM Integration Patterns**
 
@@ -313,8 +311,7 @@ def get_llm_provider() -> LLMProvider:
   - **Graph Queries**: Entity lookup → Cypher query construction → relationship traversal
   - **Document Operations**: Upload → parse → chunk → embed → index pipeline
 
-**Response Streaming**:
-  - **FastAPI SSE**: Server-Sent Events for real-time token streaming (planned)
+**Response Handling**:
   - **Progress Tracking**: Celery task metadata with `{current_step, total_steps, status}` updates
 
 **Concurrency & Hardware Management**:
@@ -354,9 +351,8 @@ class KnowledgeBase:
 #### **Document Intelligence Pipeline**
 
 **PDF Processing**:
-  - **Unstructured Partitioning**: \partition_pdf()` extracts text and infers table structures using the auto layout strategy`
+  - **Unstructured Partitioning**: `partition_pdf()` extracts text and infers table structures using the auto layout strategy
   - **Smart Parsing**: `SmartPDFParser.parse_with_metadata()` detects headers, footers, page numbers
-  - **OCR Fallback**: Tesseract integration for scanned documents (planned enhancement)
 
 **Multi-Format Support**:
   - **PDF**: `partition_pdf()` via Unstructured library
@@ -458,13 +454,9 @@ class QueryResponse(BaseModel):
 
 #### **Caching Mechanisms**
 
-**Embedding Cache**:
-  - **File-Based Pickle**: Pre-computed embeddings stored in `data/embeddings/{filename}.pkl`
-  - **Cache Invalidation**: Document deletion triggers cache eviction
-
-**LLM Response Cache** (Future Enhancement):
-  - **Redis-Backed**: Query hash → cached response (30-minute TTL)
-  - **Similarity Matching**: Retrieve cached responses for semantically similar queries
+**Caching Mechanisms**:
+  - **Embedding Cache**: In-memory caching during ingestion processing
+  - *(Note: Persistent caching is handled via Qdrant storage)*
 
 #### **Background Job Processing**
 
@@ -523,7 +515,7 @@ def ingest_document_task(self, file_path: str, filename: str):
 
 ### User Interface (Integration Layer)
 
-**Frontend Stack**: React 18 + Vite serves as a lightweight UI layer for AI system interaction via REST API
+**Frontend Stack**: React 19 + Vite serves as a lightweight UI layer for AI system interaction via REST API
 
 **Key Integrations**:
   - **Polling Mechanism**: 2-second intervals for task status updates (`usePolling` hook)
@@ -544,12 +536,12 @@ def ingest_document_task(self, file_path: str, filename: str):
 | **Backend Framework** | FastAPI 0.109+ (async endpoints, Pydantic validation) |
 | **Task Queue** | Celery 5.x with Redis broker |
 | **State Management** | Redis 7.x (task metadata, conversation history) |
-| **Document Processing** | Unstructured (PDF/DOCX parsing), PyPDF2 (metadata extraction) |
+| **Document Processing** | Unstructured (PDF/DOCX parsing) |
 | **Graph Algorithms** | Native Cypher (traversal, aggregation) |
 | **Evaluation** | RAGAS (faithfulness, context precision, answer relevance) |
 | **Observability** | LangSmith (@traceable decorators, trace export) |
 | **Math Execution** | Sandboxed Python subprocess (Standard Library) |
-| **Frontend (UI Only)** | React 18 + Vite + Tailwind (API consumption layer) |
+| **Frontend (UI Only)** | React 19 + Vite + Tailwind + Radix UI + Framer Motion |
 | **DevOps** | Docker (containerization), docker-compose (multi-service orchestration) |
 
 ---
@@ -582,7 +574,7 @@ QDRANT_PORT=6333
 QDRANT_API_KEY=                                # Leave empty for local deployment
 
 # Knowledge Graph Configuration
-NEO4J_URI=bolt://localhost:7687
+NEO4J_URI=bolt://neo4j:7687                # Service name in Docker
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your_neo4j_password             # Set during Neo4j installation
 
@@ -590,7 +582,7 @@ NEO4J_PASSWORD=your_neo4j_password             # Set during Neo4j installation
 REDIS_URL=redis://localhost:6379/0
 
 # Application Settings
-UPLOAD_DIR=./data/uploads
+UPLOAD_FOLDER=./uploads
 EMBEDDING_MODEL=all-MiniLM-L6-v2               # sentence-transformers model
 CHUNK_SIZE=512                                  # Document chunking token limit
 CHUNK_OVERLAP=50                                # Overlap between chunks
@@ -599,6 +591,7 @@ CHUNK_OVERLAP=50                                # Overlap between chunks
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=ls__...                       # LangSmith API key
 LANGCHAIN_PROJECT=documind-rag
+LANGCHAIN_ENDPOINT="https://api.smith.langchain.com"
 ```
 
 ### Setup Steps
@@ -638,20 +631,20 @@ docker run -d \
 python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 # Initialize Neo4j schema
-python backend/knowledge_graph.py --init-schema
+python backend/knowledge_graph.py
 
 # 5. Frontend Setup (Optional UI Layer)
 cd frontend && npm install  # Install React dependencies
 
 # 6. Start Celery Worker (Background Jobs)
-celery -A backend.celery_app worker --loglevel=info --concurrency=4
+celery -A backend.celery_app worker --loglevel=info
 
 # 7. Start FastAPI Backend
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 # → AI Engine runs on http://127.0.0.1:8000
 
 # 8. Start Frontend (Optional)
-npm run dev  # UI on http://localhost:3000
+npm run dev  # UI on http://localhost:5173
 ```
 
 **Verify Installation**:
@@ -756,6 +749,19 @@ curl -X POST http://localhost:8000/summarize/research_paper.pdf
 {
   "summary": "1. **Executive Overview**: This paper introduces DARTS...\n2. **Key Financials/Facts**: Reduces search cost...\n3. **Strategic Highlights**: Achieves SOTA on CIFAR-10..."
 }
+
+#### **System Dashboard**
+```bash
+# Get system health and stats
+curl http://localhost:8000/dashboard
+
+# Response:
+{
+  "tasks": {"processed": 10, "failed": 0},
+  "graph": {"nodes": 500, "edges": 1200},
+  "vectors": {"count": 1500}
+}
+```
 ```
 
 ---
@@ -802,8 +808,9 @@ documind-ai/
 │   │   ├── needs_math()              # Detect quantitative questions
 │   │   ├── generate_calculation_code() # LLM-generated Python code
 │   │   └── execute_code_safely()     # Subprocess with timeout
+│   ├── dashboard_stats.py            # Aggregates system metrics
 │   ├── evaluate_ragas.py             # RAGAS evaluation suite
-│   │   ├── run_test_suite()          # Faithfulness, context precision
+│   │   ├── run_test_suite()          # Faithfulness, answer relevancy
 │   │   └── get_dynamic_judge()       # LLM-as-a-judge for metrics
 │   ├── celery_app.py                 # Celery task queue configuration
 │   ├── tasks.py                      # Background job definitions
@@ -812,12 +819,15 @@ documind-ai/
 │   │   ├── set_processing()          # Init task with 24h TTL
 │   │   ├── get_all_statuses()        # Dashboard monitoring
 │   │   ├── set_cancelled()           # Cooperative cancellation state
-│   │   └── delete_task()             # cleanup state
-│   │   ├── set_processing()          # Update job progress
+│   │   ├── delete_task()             # cleanup state
 │   │   ├── get_status()              # Query task state
 │   │   └── set_failed()              # Error handling
 │   └── requirements.txt              # Python dependencies
-├── frontend/                         # UI Layer (React components for API interaction)
+├── frontend/                         # React 19 UI
+│   ├── src/pages/DashboardPage.jsx   # System status overview
+│   ├── src/pages/GraphPage.jsx       # 2D Graph explorer
+│   ├── src/pages/SummaryPage.jsx     # Document summarizer
+│   └── src/components/               # Radix UI + Tailwind components
 ├── data/                             # Runtime data storage
 │   ├── uploads/                      # Uploaded documents
 │   ├── embeddings/                   # Cached sentence-transformers vectors
