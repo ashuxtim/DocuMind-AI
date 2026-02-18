@@ -1,0 +1,127 @@
+services:
+  # ==========================================
+  # 1. AI INFRASTRUCTURE (The Foundation)
+  # ==========================================
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: documind-llm
+    volumes:
+      - ./ollama_storage:/root/.ollama
+    networks:
+      - documind-net
+
+  # The Installer (Fixed Syntax)
+  init-ollama:
+    image: curlimages/curl:latest
+    container_name: documind-init-ollama
+    depends_on:
+      - ollama
+    # 🔴 CHANGED: Used '|' to preserve newlines and removed '#' comments to prevent syntax errors
+    command: |
+      /bin/sh -c "
+      echo '⏳ [INIT] Waiting for Ollama Service to be ready...';
+      until curl -s -o /dev/null http://ollama:11434/api/tags; do
+        echo '... waiting for ollama server ...';
+        sleep 2;
+      done;
+      echo '✅ [INIT] Ollama Service is Online!';
+      echo '🔍 [INIT] Checking for qwen2.5:7b...';
+      if curl -s http://ollama:11434/api/tags | grep -q 'qwen2.5:7b'; then
+        echo '✅ [INIT] Model found! Setup complete.';
+        exit 0;
+      fi;
+      echo '⬇️  [INIT] Model NOT found. Starting download (approx 4.7GB)...';
+      echo '⚠️  [INIT] This will take a few minutes. Please wait...';
+      curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"qwen2.5:7b\", \"stream\": false}';
+      echo '✅ [INIT] Download Finished Successfully!';
+      "
+    networks:
+      - documind-net
+
+  # ==========================================
+  # 2. DATABASES
+  # ==========================================
+  redis:
+    image: redis:alpine
+    container_name: documind-redis
+    networks:
+      - documind-net
+
+  neo4j:
+    image: neo4j:latest
+    container_name: documind-graph
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
+    volumes:
+      - ./neo4j_data:/data
+    networks:
+      - documind-net
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: documind-qdrant
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+    networks:
+      - documind-net
+
+  # ==========================================
+  # 3. BACKEND SERVICES
+  # ==========================================
+  backend:
+    build: ./backend
+    container_name: documind-backend
+    env_file: .env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ./backend:/app
+      - ./uploads:/app/uploads
+    depends_on:
+      redis:
+        condition: service_started
+      neo4j:
+        condition: service_started
+      qdrant:
+        condition: service_started
+      init-ollama:
+        condition: service_completed_successfully
+    networks:
+      - documind-net
+
+  worker:
+    build: ./backend
+    container_name: documind-worker
+    env_file: .env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    command: celery -A celery_app.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+      - ./uploads:/app/uploads
+    depends_on:
+      redis:
+        condition: service_started
+      init-ollama:
+        condition: service_completed_successfully
+    networks:
+      - documind-net
+
+  # ==========================================
+  # 4. FRONTEND
+  # ==========================================
+  frontend:
+    build: ./frontend
+    container_name: documind-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - documind-net
+
+networks:
+  documind-net:
+    driver: bridge
