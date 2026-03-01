@@ -1,0 +1,29 @@
+# ─── PVC: Redis Data Storage ───────────────────────────────────
+# Requests 1Gi of storage for Redis's append-only file (AOF).
+#
+# HOW THIS WORKS (Minikube):
+# 1. You create this PVC ("I need 1Gi")
+# 2. Minikube's 'standard' StorageClass sees the request
+# 3. It automatically creates a PersistentVolume (1Gi folder on disk)
+# 4. The PVC is "Bound" to that PV
+# 5. Any pod that mounts this PVC gets access to that folder
+#
+# WHY 1Gi?
+# Redis in DocuMind stores Celery task metadata and document statuses.
+# That's tiny — maybe a few MB. 1Gi gives plenty of headroom.
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  labels:
+    app: redis
+spec:
+  accessModes:
+    - ReadWriteOnce          # Only one node can mount this at a time
+                             # Fine for single-instance Redis
+  resources:
+    requests:
+      storage: 1Gi           # How much disk space to reserve
+  storageClassName: standard  # Minikube's default — auto-provisions the PV

@@ -1,0 +1,145 @@
+# ─── STATEFULSET: Neo4j Graph Database ─────────────────────────
+#
+# WHAT THIS REPLACES from docker-compose:
+#   neo4j:
+#     image: neo4j:latest
+#     container_name: documind-graph
+#     environment:
+#       - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
+#     volumes:
+#       - ./neo4j_data:/data
+#
+# KEY DIFFERENCES IN K8S:
+# - TWO PVCs: data (10Gi) + logs (1Gi) — separated for management
+# - Credentials from K8s Secret (not .env file)
+# - JVM heap + page cache tuning via environment variables
+# - Health checks via Neo4j's built-in HTTP endpoints
+#
+# ⚠️ K8S GOTCHA (what broke the first deploy):
+# K8s auto-injects env vars for every Service in the namespace.
+# Because the Service is named "neo4j-service", K8s creates vars like:
+#   NEO4J_SERVICE_PORT_7687_TCP_PROTO=tcp
+# Neo4j sees anything starting with "NEO4J_" and tries to parse it
+# as config → "Unrecognized setting" → crash.
+# FIX: Set server.config.strict_validation.enabled=false
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: neo4j
+  labels:
+    app: neo4j
+    component: database
+spec:
+  serviceName: neo4j-headless    # Links to Headless Service
+  replicas: 1                    # Single instance — Community Edition
+                                  # (Enterprise Edition supports clustering)
+  selector:
+    matchLabels:
+      app: neo4j
+
+  template:
+    metadata:
+      labels:
+        app: neo4j
+        component: database
+    spec:
+      containers:
+      - name: neo4j
+        image: neo4j:latest
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: bolt
+          containerPort: 7687     # Bolt protocol — Python driver connects here
+          protocol: TCP
+        - name: http
+          containerPort: 7474     # HTTP — Neo4j Browser UI
+          protocol: TCP
+
+        # ── ENVIRONMENT VARIABLES ──
+        env:
+        # Disable auth for local development.
+        # For production, change to: "neo4j/your-secure-password"
+        - name: NEO4J_AUTH
+          value: "none"
+
+        # ── K8s COMPATIBILITY FIX ──
+        # K8s injects Service env vars (like NEO4J_SERVICE_PORT_7687_TCP_PROTO)
+        # into every pod. Neo4j sees "NEO4J_*" and tries to parse them as
+        # config settings → "Unrecognized setting" → crash!
+        # This tells Neo4j to ignore settings it doesn't recognize.
+        - name: NEO4J_server_config_strict__validation_enabled
+          value: "false"
+
+        # ── JVM TUNING ──
+        # Neo4j runs on the JVM — these control memory allocation.
+        # Double underscores (__) map to dashes in Neo4j config:
+        #   server.memory.heap.max_size → NEO4J_server_memory_heap_max__size
+        - name: NEO4J_server_memory_heap_initial__size
+          value: "256m"           # Initial JVM heap
+        - name: NEO4J_server_memory_heap_max__size
+          value: "512m"           # Max JVM heap (must fit within container limits)
+        - name: NEO4J_server_memory_pagecache_size
+          value: "256m"           # Off-heap cache for graph data pages
+
+        # ── VOLUME MOUNTS ──
+        volumeMounts:
+        - name: neo4j-data
+          mountPath: /data         # Neo4j's database files
+        - name: neo4j-logs
+          mountPath: /logs         # Neo4j's transaction logs
+
+        # ── RESOURCE LIMITS ──
+        # Neo4j JVM needs heap (512m) + page cache (256m) + overhead
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "1536Mi"       # 1.5Gi — allows heap + pagecache + OS overhead
+            cpu: "1000m"
+
+        # ── HEALTH CHECKS ──
+        livenessProbe:
+          httpGet:
+            path: /                # Neo4j returns 200 on root when alive
+            port: 7474
+          initialDelaySeconds: 60  # Neo4j takes ~30-60s to start (JVM warmup)
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 5     # More lenient — Neo4j startup is slow
+
+        readinessProbe:
+          httpGet:
+            path: /                # Returns 200 when ready for queries
+            port: 7474
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+  # ── VOLUME CLAIM TEMPLATES ──
+  # Two separate PVCs per pod: data + logs
+  # Pod neo4j-0 gets: neo4j-data-neo4j-0 + neo4j-logs-neo4j-0
+  volumeClaimTemplates:
+  - metadata:
+      name: neo4j-data
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 10Gi           # Graph data — grows with relationships
+
+  - metadata:
+      name: neo4j-logs
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 1Gi            # Transaction logs — rotate frequently

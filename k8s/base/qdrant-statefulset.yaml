@@ -1,0 +1,108 @@
+# ─── STATEFULSET: Qdrant Vector Database ───────────────────────
+#
+# WHAT THIS REPLACES from docker-compose:
+#   qdrant:
+#     image: qdrant/qdrant:latest
+#     container_name: documind-qdrant
+#     volumes:
+#       - ./qdrant_storage:/qdrant/storage
+#
+# WHY STATEFULSET (not Deployment)?
+# 1. Stable pod name: qdrant-0 (not qdrant-abc123)
+# 2. Per-pod storage: each replica gets its own PVC
+# 3. Ordered startup: qdrant-0 starts before qdrant-1
+# 4. Required for Qdrant's clustering features
+#
+# WHAT'S NEW IN K8S:
+# - volumeClaimTemplates auto-create 10Gi PVC per pod
+# - Health checks via Qdrant's REST API
+# - Resource limits prevent Qdrant from consuming all RAM
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  labels:
+    app: qdrant
+    component: database
+spec:
+  # ── STATEFULSET-SPECIFIC CONFIG ──
+  serviceName: qdrant-headless   # MUST match the Headless Service name
+                                  # This is what enables pod DNS:
+                                  # qdrant-0.qdrant-headless
+  replicas: 1                    # Single instance for learning
+                                  # Scale to 2+ for Qdrant cluster mode
+
+  selector:
+    matchLabels:
+      app: qdrant
+
+  template:
+    metadata:
+      labels:
+        app: qdrant
+        component: database
+    spec:
+      containers:
+      - name: qdrant
+        image: qdrant/qdrant:latest
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: http
+          containerPort: 6333     # REST API
+          protocol: TCP
+        - name: grpc
+          containerPort: 6334     # gRPC API
+          protocol: TCP
+
+        # ── VOLUME MOUNTS ──
+        # Mount the auto-created PVC at Qdrant's storage directory
+        volumeMounts:
+        - name: qdrant-data
+          mountPath: /qdrant/storage    # Qdrant's default storage path
+
+        # ── RESOURCE LIMITS ──
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+
+        # ── HEALTH CHECKS ──
+        # Qdrant has a built-in healthz endpoint
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 6333
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 6333
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+
+  # ── VOLUME CLAIM TEMPLATES ──
+  # This is the StatefulSet magic — auto-creates a PVC per pod.
+  # Pod qdrant-0 gets PVC "qdrant-data-qdrant-0"
+  # Pod qdrant-1 would get PVC "qdrant-data-qdrant-1"
+  volumeClaimTemplates:
+  - metadata:
+      name: qdrant-data           # Combined with pod name: qdrant-data-qdrant-0
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      storageClassName: standard   # Minikube's default
+      resources:
+        requests:
+          storage: 10Gi            # Qdrant stores vectors — needs space

@@ -1,0 +1,28 @@
+# ─── SERVICE: Neo4j (Application Access) ──────────────────────
+# ClusterIP Service for application connections.
+# FastAPI connects to "neo4j-service:7687" (Bolt protocol).
+#
+# WHAT THIS REPLACES from docker-compose:
+#   The backend connected to neo4j as "neo4j:7687" via Docker network.
+#   In K8s, it's "neo4j-service:7687" — matches your ConfigMap.
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j-service
+  labels:
+    app: neo4j
+spec:
+  type: ClusterIP
+  selector:
+    app: neo4j
+  ports:
+  - name: bolt
+    port: 7687
+    targetPort: 7687
+    protocol: TCP
+  - name: http
+    port: 7474
+    targetPort: 7474
+    protocol: TCP

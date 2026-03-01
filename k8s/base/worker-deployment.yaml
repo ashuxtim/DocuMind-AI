@@ -1,0 +1,93 @@
+# ─── DEPLOYMENT: Celery Worker ─────────────────────────────────
+#
+# WHAT THIS REPLACES from docker-compose:
+#   worker:
+#     build: ./backend
+#     command: celery -A celery_app.celery_app worker --loglevel=info
+#     env_file: .env
+#     depends_on: [redis, init-ollama]
+#
+# KEY DIFFERENCES IN K8S:
+# - Same image as FastAPI, different CMD (via 'command' override)
+# - Uses same ConfigMap & Secret (shared config)
+# - No depends_on — K8s handles startup order via readiness probes
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app: worker
+    component: backend
+spec:
+  replicas: 1               # Start with 1 worker — scale up if queue builds up
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+        component: backend
+    spec:
+      containers:
+      - name: worker
+        image: documind-fastapi:v1.1       # Same image as FastAPI!
+        imagePullPolicy: IfNotPresent
+
+        # ── OVERRIDE THE DEFAULT COMMAND ──
+        # The Dockerfile CMD is "uvicorn main:app ..."
+        # We override it to run Celery instead.
+        command: ["celery"]
+        args:
+          - "-A"
+          - "celery_app.celery_app"
+          - "worker"
+          - "--loglevel=info"
+          - "--concurrency=2"              # Limit concurrent tasks (save RAM)
+
+        # ── SHARED CONFIG ──
+        # Same ConfigMap & Secret as FastAPI — one source of truth!
+        envFrom:
+        - configMapRef:
+            name: documind-config
+        - secretRef:
+            name: documind-secrets
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+
+        # ── HEALTH CHECK ──
+        # Celery workers don't serve HTTP. Use a command-based probe.
+        livenessProbe:
+          exec:
+            command:
+              - "celery"
+              - "-A"
+              - "celery_app.celery_app"
+              - "inspect"
+              - "ping"
+              - "--timeout=5"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+      # ── SHARED UPLOADS VOLUME ──
+      # The worker needs access to uploaded files for document processing.
+      # For now, use an emptyDir. In Phase 4+, you'd use a shared PVC (RWX)
+      # or object storage (MinIO/S3) for true multi-pod file sharing.
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/uploads
+
+      volumes:
+      - name: uploads
+        emptyDir: {}          # Temporary — files won't survive pod restarts
+                              # This is fine for now since uploads are also on the API pod

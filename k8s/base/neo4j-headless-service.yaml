@@ -1,0 +1,24 @@
+# ─── HEADLESS SERVICE: Neo4j ──────────────────────────────────
+# Required by StatefulSet for stable pod DNS.
+# DNS: neo4j-0.neo4j-headless.default.svc.cluster.local
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j-headless
+  labels:
+    app: neo4j
+spec:
+  clusterIP: None
+  selector:
+    app: neo4j
+  ports:
+  - name: bolt                   # Bolt protocol — what your Python driver uses
+    port: 7687
+    targetPort: 7687
+    protocol: TCP
+  - name: http                   # HTTP — Neo4j Browser UI
+    port: 7474
+    targetPort: 7474
+    protocol: TCP

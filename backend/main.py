@@ -38,6 +38,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- HEALTH CHECK (for Kubernetes probes) ---
+@app.get("/health")
+async def health_check():
+    """
+    Lightweight health check for Kubernetes liveness & readiness probes.
+    
+    WHY THIS EXISTS:
+    - Kubernetes calls this endpoint every few seconds
+    - Liveness probe: If this fails, K8s kills and restarts the pod
+    - Readiness probe: If this fails, K8s stops sending traffic to this pod
+    
+    WHY IT'S SIMPLE:
+    - Health probes must be FAST (< 1 second response)
+    - Don't check databases here — that's too slow and fragile
+    - If Neo4j is down, your app is still "alive" (just degraded)
+    """
+    return {
+        "status": "healthy",
+        "service": "documind-backend",
+        "version": "1.0.0"
+    }
+
+
 # --- GLOBAL INSTANCES ---
 # 1. NEW: Vector DB (Qdrant) - Used for Query/Search
 vector_db = VectorStore()

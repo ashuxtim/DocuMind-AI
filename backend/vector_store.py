@@ -19,7 +19,10 @@ class VectorStore:
         self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
         self.vector_size = 384 
 
-        self._ensure_collection()
+        try:
+            self._ensure_collection()
+        except Exception as e:
+            print(f"⚠️ Qdrant not available yet ({e}). Collection will be created on first use.")
 
     def _ensure_collection(self):
         """Creates the collection if it doesn't exist."""

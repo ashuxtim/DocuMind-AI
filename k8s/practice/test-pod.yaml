@@ -1,0 +1,21 @@
+# Every K8s resource has these 4 top-level fields
+apiVersion: v1              # Which K8s API version (v1 for core resources)
+kind: Pod                   # What type of resource
+metadata:                   # Identity — name, labels, namespace
+  name: lifecycle-demo
+  labels:                   # Labels are KEY-VALUE tags for organizing & selecting
+    app: demo               # Services use these to find pods
+    purpose: learning
+spec:                       # Specification — what you WANT
+  containers:
+  - name: nginx
+    image: nginx:1.25       # Pinned version (not :latest — be specific!)
+    ports:
+    - containerPort: 80
+    resources:               # Resource management — crucial for production
+      requests:              # "I need AT LEAST this much" (scheduler uses this)
+        memory: "64Mi"
+        cpu: "250m"          # 250 millicores = 0.25 CPU cores
+      limits:                # "NEVER exceed this" (K8s kills container if exceeded)
+        memory: "128Mi"
+        cpu: "500m"          # 500 millicores = 0.5 CPU cores

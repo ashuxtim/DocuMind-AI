@@ -1,0 +1,75 @@
+# ─── DEPLOYMENT: DocuMind FastAPI Backend ───────────────────────
+# UPDATED: Now uses ConfigMap and Secret instead of hardcoded env vars.
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi
+  labels:
+    app: fastapi
+    component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fastapi
+  template:
+    metadata:
+      labels:
+        app: fastapi
+        component: backend
+    spec:
+      containers:
+      - name: fastapi
+        image: documind-fastapi:v1.1
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+
+        # ── ENVIRONMENT FROM CONFIGMAP & SECRET ──
+        # envFrom injects ALL keys from the ConfigMap/Secret as env vars.
+        # This replaces the manual "env:" list from Phase 2.
+        #
+        # BEFORE (Phase 2):
+        #   env:
+        #     - name: REDIS_URL
+        #       value: "redis://redis-service:6379/0"  ← Hardcoded
+        #
+        # AFTER (Phase 3):
+        #   envFrom:
+        #     - configMapRef: documind-config  ← All keys become env vars
+        envFrom:
+        - configMapRef:
+            name: documind-config      # Injects: REDIS_URL, QDRANT_HOST, etc.
+        - secretRef:
+            name: documind-secrets     # Injects: NEO4J_PASSWORD, API keys
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2

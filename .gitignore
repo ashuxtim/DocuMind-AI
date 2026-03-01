@@ -87,3 +87,4 @@ DevOps/
 tmp/
 temp/
 .cache/
+k8s/base/documind-secret.yaml

@@ -1,0 +1,32 @@
+# ─── HEADLESS SERVICE: Qdrant ──────────────────────────────────
+# Required by StatefulSet for stable per-pod DNS.
+#
+# WITH THIS SERVICE:
+#   qdrant-0.qdrant-headless.default.svc.cluster.local → Pod 0's IP
+#   qdrant-1.qdrant-headless.default.svc.cluster.local → Pod 1's IP
+#
+# WHY clusterIP: None?
+# Normal Services create a virtual IP. Headless Services skip that
+# and return pod IPs directly via DNS. StatefulSets REQUIRE this
+# for stable pod identity.
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-headless
+  labels:
+    app: qdrant
+spec:
+  clusterIP: None              # THIS is what makes it "headless"
+  selector:
+    app: qdrant
+  ports:
+  - name: http
+    port: 6333
+    targetPort: 6333
+    protocol: TCP
+  - name: grpc
+    port: 6334
+    targetPort: 6334
+    protocol: TCP

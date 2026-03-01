@@ -1,0 +1,29 @@
+# ─── SERVICE: Qdrant (Application Access) ─────────────────────
+# ClusterIP Service — this is what FastAPI connects to.
+# DNS: qdrant-service → load balances across Qdrant pods.
+#
+# WHAT THIS REPLACES from docker-compose:
+#   Your docker-compose didn't expose Qdrant ports externally.
+#   The backend connected via the Docker network as "qdrant:6333".
+#   In K8s, it connects as "qdrant-service:6333" — same idea.
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-service
+  labels:
+    app: qdrant
+spec:
+  type: ClusterIP
+  selector:
+    app: qdrant
+  ports:
+  - name: http
+    port: 6333
+    targetPort: 6333
+    protocol: TCP
+  - name: grpc
+    port: 6334
+    targetPort: 6334
+    protocol: TCP
