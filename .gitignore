@@ -88,3 +88,7 @@ tmp/
 temp/
 .cache/
 k8s/base/documind-secret.yaml
+k8s/library/
+k8s/migration-plan.md
+merge_code.py
+get-docker.sh
