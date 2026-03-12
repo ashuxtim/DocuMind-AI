@@ -5,6 +5,7 @@ from celery.exceptions import Ignore
 from celery_app import celery_app
 from state_manager import state_manager
 from ingest import DocuMindIngest
+from minio_storage import MinIOStorage
 
 # 🔴 FIX: Environment-driven Redis URL for Docker/Kubernetes compatibility
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -13,7 +14,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 redis_client = redis.Redis.from_url(REDIS_URL)
 
 @celery_app.task(bind=True, name="ingest_document")
-def ingest_document_task(self, file_path: str, filename: str):
+def ingest_document_task(self, filename: str):
     """
     Celery task wrapper for document ingestion.
     Implements distributed GPU locking, cooperative cancellation, and state sync.
@@ -48,6 +49,10 @@ def ingest_document_task(self, file_path: str, filename: str):
         
         # 🔴 FIX: Instantiate AFTER lock to protect GPU memory
         ingestor = DocuMindIngest()
+
+        # Download file from MinIO to temp path for parsing
+        minio = MinIOStorage()
+        file_path = minio.download_to_temp(filename)
 
         # 5. Hardened Async Execution Block
         result = asyncio.run(
@@ -88,6 +93,12 @@ def ingest_document_task(self, file_path: str, filename: str):
     finally:
         # 10. CRASH-SAFE LOCK RELEASE
         # Guaranteed to release the GPU whether we succeed, fail, or get cancelled
+        try:
+            if 'file_path' in locals() and os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"🗑️ Temp file cleaned: {file_path}")
+        except Exception as e:
+            print(f"⚠️ Temp file cleanup warning: {e}")
         try:
             # Check if this specific worker still owns the lock before releasing
             if gpu_lock.locked() and gpu_lock.owned():

@@ -15,6 +15,7 @@ backoff==2.2.1
 bcrypt==5.0.0
 beautifulsoup4==4.14.3
 billiard==4.2.4
+boto3
 build==1.4.0
 celery==5.6.2
 certifi==2026.1.4

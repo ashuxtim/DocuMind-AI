@@ -23,6 +23,7 @@ const FALLBACK_DATA = {
         neo4j: 'unknown',
         qdrant: 'unknown',
         llm: 'unknown',
+        minio: 'unknown',
     },
 };
 

@@ -7,7 +7,7 @@ services:
     image: ollama/ollama:latest
     container_name: documind-llm
     volumes:
-      - ./ollama_storage:/root/.ollama
+      - ollama_storage:/root/.ollama
     networks:
       - documind-net
 
@@ -54,7 +54,7 @@ services:
     environment:
       - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
     volumes:
-      - ./neo4j_data:/data
+      - neo4j_data:/data
     networks:
       - documind-net
 
@@ -62,7 +62,36 @@ services:
     image: qdrant/qdrant:latest
     container_name: documind-qdrant
     volumes:
-      - ./qdrant_storage:/qdrant/storage
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - documind-net
+
+  minio:
+    image: minio/minio:latest
+    container_name: documind-minio
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - documind-net
+
+  init-minio:
+    image: minio/mc:latest
+    container_name: documind-init-minio
+    depends_on:
+      - minio
+    entrypoint: /bin/sh -c "
+      sleep 5;
+      mc alias set local http://minio:9000 minioadmin minioadmin123;
+      mc mb local/documind-uploads --ignore-existing;
+      echo 'Bucket ready';
+      "
     networks:
       - documind-net
 
@@ -78,7 +107,6 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8000
     volumes:
       - ./backend:/app
-      - ./uploads:/app/uploads
     depends_on:
       redis:
         condition: service_started
@@ -88,6 +116,8 @@ services:
         condition: service_started
       init-ollama:
         condition: service_completed_successfully
+      minio:
+        condition: service_started
     networks:
       - documind-net
 
@@ -100,12 +130,13 @@ services:
     command: celery -A celery_app.celery_app worker --loglevel=info
     volumes:
       - ./backend:/app
-      - ./uploads:/app/uploads
     depends_on:
       redis:
         condition: service_started
       init-ollama:
         condition: service_completed_successfully
+      minio:
+        condition: service_started
     networks:
       - documind-net
 
@@ -121,6 +152,12 @@ services:
       - backend
     networks:
       - documind-net
+
+volumes:
+  ollama_storage:
+  neo4j_data:
+  qdrant_storage:
+  minio_data:
 
 networks:
   documind-net:

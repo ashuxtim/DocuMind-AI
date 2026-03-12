@@ -1,4 +1,4 @@
-import { Activity, Database, Network, Server, Brain, Zap, AlertCircle, Clock } from 'lucide-react';
+import { Activity, Database, Network, Server, Brain, HardDrive, Zap, AlertCircle, Clock } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/ui/card';
 import { cn } from '@/lib/utils';
 
@@ -64,6 +64,7 @@ export function HealthPanel({ health }) {
                     <HealthRow icon={Network} name="Neo4j (Knowledge Graph)" status={health.neo4j} />
                     <HealthRow icon={Server} name="Qdrant (Vector Store)" status={health.qdrant} />
                     <HealthRow icon={Brain} name="LLM Provider" status={health.llm} />
+                    <HealthRow icon={HardDrive} name="MinIO (Object Storage)" status={health.minio} />
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-border">
