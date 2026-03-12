@@ -1,38 +1,21 @@
 # ─── SERVICE: DocuMind FastAPI ──────────────────────────────────
-# A Service provides a stable network endpoint for your pods.
-# Without this, you'd have to know each pod's random IP address.
-#
-# WHAT THIS FILE TELLS K8S:
-# "Create a stable endpoint called 'fastapi-service'.
-#  Route any traffic on port 8000 to pods with label app=fastapi.
-#  Also expose it on node port 30800 so I can access it from my browser."
+# UPDATED: Changed from NodePort to ClusterIP.
+# External access is now via Ingress, not NodePort.
 # ────────────────────────────────────────────────────────────────
 
-apiVersion: v1             # Services are core resources (v1, no group prefix)
+apiVersion: v1
 kind: Service
 metadata:
-  name: fastapi-service    # This becomes a DNS name inside the cluster!
-                           # Other pods can reach your FastAPI at: http://fastapi-service:8000
+  name: fastapi-service
   labels:
     app: fastapi
 spec:
-  type: NodePort           # Exposes the service on each node's IP at a static port
-                           # For development: access via http://<minikube-ip>:30800
-                           # In production: you'd use LoadBalancer or Ingress instead
-
-  # ── SELECTOR ──
-  # "Which pods should receive this traffic?"
-  # MUST match the labels on your Deployment's pod template
+  type: ClusterIP               # Changed from NodePort!
   selector:
-    app: fastapi           # Routes to ANY pod with label app=fastapi
-
+    app: fastapi
   ports:
   - name: http
-    port: 8000             # The port the Service listens on (inside cluster)
-    targetPort: 8000       # The port on the pod to forward to (containerPort)
-    nodePort: 30800        # The port on your machine (http://192.168.49.2:30800)
-                           # Range: 30000-32767 (K8s restriction)
+    port: 8000
+    targetPort: 8000
     protocol: TCP
-
-  sessionAffinity: None    # Load balance evenly across pods (round-robin)
-                           # Use "ClientIP" if you need sticky sessions
+  # nodePort: 30800             ← Removed! Ingress handles external access now.

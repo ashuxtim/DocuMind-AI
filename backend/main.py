@@ -23,13 +23,17 @@ from state_manager import state_manager
 from fastapi.staticfiles import StaticFiles
 from langsmith import traceable
 from agent_graph import app_graph
+from minio_storage import MinIOStorage
 
 # --- CONFIGURATION ---
-UPLOAD_DIR = "uploads"
+UPLOAD_DIR = "uploads"  # Kept as fallback for temp ops
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI(title="DocuMind AI")
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+# REMOVED: app.mount("/uploads", ...) — files now stored in MinIO
+
+# MinIO client
+storage = MinIOStorage()
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,7 +92,7 @@ class QueryResponse(BaseModel):
 @app.post("/upload")
 async def upload_document(file: UploadFile = File(...)):
     """
-    Saves the file and dispatches a Celery task for ingestion.
+    Saves the file to MinIO and dispatches a Celery task for ingestion.
     Returns a task_id immediately.
     """
     # Validate file type
@@ -101,23 +105,22 @@ async def upload_document(file: UploadFile = File(...)):
             detail=f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}"
         )
     
-    # Check if file already exists
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    if os.path.exists(file_path):
+    # Check if file already exists IN MINIO
+    if storage.file_exists(file.filename):
         raise HTTPException(
             status_code=409,
             detail=f"File '{file.filename}' already exists. Please rename or delete the existing file."
         )
     
-    # Save file to disk
+    # Upload to MinIO
     try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        file.file.seek(0)
+        storage.upload_file(file.filename, file.file)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
-    # DISPATCH CELERY TASK
-    task = ingest_document_task.delay(file_path, file.filename)
+    # DISPATCH CELERY TASK (pass filename only, worker downloads from MinIO)
+    task = ingest_document_task.delay(file.filename)
     
     # TRACK STATE IN REDIS
     state_manager.set_processing(file.filename, task.id)
@@ -183,16 +186,15 @@ async def delete_document(filename: str):
         results["steps"]["memory"] = f"failed: {str(e)}"
         print(f"❌ Cleanup failed for {filename}: {e}")
 
-    # 2. Delete Physical File
-    file_path = os.path.join(UPLOAD_DIR, filename)
-    if os.path.exists(file_path):
-        try:
-            os.remove(file_path)
-            results["steps"]["disk"] = "deleted"
-        except Exception as e:
-            results["steps"]["disk"] = f"error: {str(e)}"
-    else:
-        results["steps"]["disk"] = "not_found"
+    # 2. Delete from MinIO
+    try:
+        if storage.file_exists(filename):
+            storage.delete_file(filename)
+            results["steps"]["storage"] = "deleted"
+        else:
+            results["steps"]["storage"] = "not_found"
+    except Exception as e:
+        results["steps"]["storage"] = f"error: {str(e)}"
 
     # 3. Clean up Redis State (Status Tracking)
     # We attempt to remove the 'processing/completed' status so it doesn't linger
@@ -213,29 +215,17 @@ def get_documents():
     """
     Returns a list of documents with full metadata including status.
     """
-    if not os.path.exists(UPLOAD_DIR):
-        return {"documents": []}
-    
     # Get all statuses from Redis
     all_statuses = state_manager.get_all_statuses()
     
     documents = []
     
-    # List all files in the uploads folder
-    files = [
-        f for f in os.listdir(UPLOAD_DIR)
-        if os.path.isfile(os.path.join(UPLOAD_DIR, f))
-    ]
+    # List files from MinIO instead of os.listdir
+    minio_files = storage.list_files()
     
-    for filename in files:
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        
-        # Get file stats
-        try:
-            stat_info = os.stat(file_path)
-            file_size = stat_info.st_size
-        except:
-            file_size = 0
+    for file_info in minio_files:
+        filename = file_info["filename"]
+        file_size = file_info["size"]
         
         # Get status from Redis
         status_data = all_statuses.get(filename)
@@ -252,12 +242,7 @@ def get_documents():
                 "size": file_size,
                 "type": get_mime_type(filename)
             }
-            
-            # Only provide URL if completed
-            if status_data.get("status") == "completed":
-                doc_info["url"] = f"/uploads/{filename}"
-            else:
-                doc_info["url"] = None
+            doc_info["url"] = None  # No static file serving; frontend uses API
         else:
             # File exists but no status (orphaned or pre-migration)
             doc_info = {
@@ -269,7 +254,7 @@ def get_documents():
                 "error": None,
                 "size": file_size,
                 "type": get_mime_type(filename),
-                "url": f"/uploads/{filename}"
+                "url": None
             }
         
         documents.append(doc_info)
@@ -305,16 +290,10 @@ def _build_dashboard_data() -> dict:
     active_jobs = 0
     try:
         all_statuses = state_manager.get_all_statuses()
-        files = [
-            f for f in os.listdir(UPLOAD_DIR)
-            if os.path.isfile(os.path.join(UPLOAD_DIR, f))
-        ]
-        for filename in files:
-            file_path = os.path.join(UPLOAD_DIR, filename)
-            try:
-                file_size = os.stat(file_path).st_size
-            except Exception:
-                file_size = 0
+        minio_files = storage.list_files()
+        for file_info in minio_files:
+            filename = file_info["filename"]
+            file_size = file_info["size"]
 
             status_data = all_statuses.get(filename, {})
             status = status_data.get("status", "completed")
@@ -413,6 +392,14 @@ def _build_dashboard_data() -> dict:
     except Exception:
         llm_status = "disconnected"
 
+    # MinIO
+    minio_status = "unknown"
+    try:
+        storage.client.head_bucket(Bucket=storage.bucket)
+        minio_status = "connected"
+    except Exception:
+        minio_status = "disconnected"
+
     # ── 4. OVERVIEW ────────────────────────────────────────────────
     llm_provider = os.getenv("LLM_PROVIDER", "Unknown")
     concurrency_mode = os.getenv("CONCURRENCY_MODE", "Local")
@@ -438,6 +425,7 @@ def _build_dashboard_data() -> dict:
             "neo4j": neo4j_status,
             "qdrant": qdrant_status,
             "llm": llm_status,
+            "minio": minio_status,
         },
     }
 

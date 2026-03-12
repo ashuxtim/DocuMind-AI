@@ -1,0 +1,23 @@
+# ─── HEADLESS SERVICE: MinIO ──────────────────────────────────
+# Required by StatefulSet for stable pod DNS.
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-headless
+  labels:
+    app: minio
+spec:
+  clusterIP: None
+  selector:
+    app: minio
+  ports:
+  - name: api
+    port: 9000                   # S3-compatible API
+    targetPort: 9000
+    protocol: TCP
+  - name: console
+    port: 9001                   # MinIO web console
+    targetPort: 9001
+    protocol: TCP

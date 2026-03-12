@@ -1,0 +1,24 @@
+# ─── SERVICE: MinIO (Application Access) ──────────────────────
+# ClusterIP Service for S3 API and console access.
+# FastAPI would connect to "minio-service:9000" for object storage.
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-service
+  labels:
+    app: minio
+spec:
+  type: ClusterIP
+  selector:
+    app: minio
+  ports:
+  - name: api
+    port: 9000
+    targetPort: 9000
+    protocol: TCP
+  - name: console
+    port: 9001
+    targetPort: 9001
+    protocol: TCP

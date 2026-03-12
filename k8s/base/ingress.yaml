@@ -1,0 +1,77 @@
+# ─── INGRESS: DocuMind Path-Based Routing ──────────────────────
+#
+# Routes all traffic through a single domain with path prefixes.
+#
+# HOW IT WORKS:
+# 1. Browser hits http://documind.local/api/health
+# 2. /etc/hosts resolves documind.local → Minikube IP
+# 3. NGINX Ingress Controller receives the request
+# 4. Matches path /api/* → strips prefix → forwards to fastapi-service
+# 5. FastAPI receives request at /health (prefix stripped!)
+#
+# THE rewrite-target ANNOTATION:
+# Without it:  /api/health → FastAPI receives /api/health → 404!
+# With it:     /api/health → FastAPI receives /health     → 200 ✅
+# The $2 captures everything after the prefix via regex groups.
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: documind-ingress
+  labels:
+    app: documind
+  annotations:
+    # Strip the path prefix before forwarding to backend
+    # /api/health → /health (FastAPI doesn't know about /api prefix)
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    # Don't redirect HTTP to HTTPS (no TLS for local dev)
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx         # Use the NGINX Ingress Controller
+
+  rules:
+  - host: documind.local          # Only handle requests for this domain
+    http:
+      paths:
+      # ── FastAPI Backend ──
+      # /api/health  → fastapi-service:8000/health
+      # /api/upload  → fastapi-service:8000/upload
+      - path: /api(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: fastapi-service
+            port:
+              number: 8000
+
+      # ── Qdrant Vector DB ──
+      # /qdrant/healthz     → qdrant-service:6333/healthz
+      # /qdrant/collections → qdrant-service:6333/collections
+      - path: /qdrant(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: qdrant-service
+            port:
+              number: 6333
+
+      # ── Neo4j Browser ──
+      # /neo4j/ → neo4j-service:7474/
+      - path: /neo4j(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: neo4j-service
+            port:
+              number: 7474
+
+      # ── MinIO Console ──
+      # /minio/ → minio-service:9001/
+      - path: /minio(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: minio-service
+            port:
+              number: 9001

@@ -1,42 +1,54 @@
 #!/bin/bash
-# DocuMind K8s Status Check
-# Run this anytime to see the state of your cluster
-
-echo "═══════════════════════════════════════════"
-echo " 🎯 DocuMind Kubernetes Status"
-echo "═══════════════════════════════════════════"
+# ─── k8s-status.sh ──────────────────────────────────────────────
+# One-command overview of the entire DocuMind K8s deployment.
+# Updated in Phase 6 to include MinIO, Ingress, and resource usage.
+# ────────────────────────────────────────────────────────────────
 
 echo ""
-echo "── Cluster ──────────────────────────────"
-kubectl cluster-info 2>/dev/null | head -1
+echo "═══════════════════════════════════════════════"
+echo " 📊 DocuMind K8s — Full Stack Status"
+echo "═══════════════════════════════════════════════"
 
 echo ""
-echo "── Nodes ────────────────────────────────"
-kubectl get nodes
+echo "── Deployments ──"
+kubectl get deployments -o wide 2>/dev/null || echo "  (none)"
 
 echo ""
-echo "── Deployments ──────────────────────────"
-kubectl get deployments
+echo "── StatefulSets ──"
+kubectl get statefulsets -o wide 2>/dev/null || echo "  (none)"
 
 echo ""
-echo "── StatefulSets ─────────────────────────"
-kubectl get statefulsets
+echo "── Pods ──"
+kubectl get pods -o wide 2>/dev/null || echo "  (none)"
 
 echo ""
-echo "── PersistentVolumeClaims ─────────────────"
-kubectl get pvc
+echo "── Services ──"
+kubectl get services 2>/dev/null || echo "  (none)"
 
 echo ""
-echo "── Pods ─────────────────────────────────"
-kubectl get pods -o wide
+echo "── Ingress ──"
+kubectl get ingress 2>/dev/null || echo "  (none)"
 
 echo ""
-echo "── Services ─────────────────────────────"
-kubectl get services
+echo "── PVCs ──"
+kubectl get pvc 2>/dev/null || echo "  (none)"
 
 echo ""
-echo "── Endpoints ────────────────────────────"
-kubectl get endpoints
+echo "── ConfigMaps ──"
+kubectl get configmaps 2>/dev/null | grep -v "kube-" || echo "  (none)"
 
 echo ""
-echo "═══════════════════════════════════════════"
+echo "── Secrets ──"
+kubectl get secrets 2>/dev/null | grep -v "default-token\|kubernetes.io" || echo "  (none)"
+
+echo ""
+echo "── Resource Usage ──"
+kubectl top pods 2>/dev/null || echo "  (enable: minikube addons enable metrics-server)"
+
+echo ""
+echo "── Recent Events (last 10) ──"
+kubectl get events --sort-by='.lastTimestamp' 2>/dev/null | tail -10 || echo "  (none)"
+
+echo ""
+echo "═══════════════════════════════════════════════"
+echo ""

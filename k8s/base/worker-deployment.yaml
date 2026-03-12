@@ -63,22 +63,6 @@ spec:
             memory: "1Gi"
             cpu: "1000m"
 
-        # ── HEALTH CHECK ──
-        # Celery workers don't serve HTTP. Use a command-based probe.
-        livenessProbe:
-          exec:
-            command:
-              - "celery"
-              - "-A"
-              - "celery_app.celery_app"
-              - "inspect"
-              - "ping"
-              - "--timeout=5"
-          initialDelaySeconds: 30
-          periodSeconds: 30
-          timeoutSeconds: 10
-          failureThreshold: 3
-
       # ── SHARED UPLOADS VOLUME ──
       # The worker needs access to uploaded files for document processing.
       # For now, use an emptyDir. In Phase 4+, you'd use a shared PVC (RWX)

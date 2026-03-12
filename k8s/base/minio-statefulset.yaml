@@ -1,0 +1,106 @@
+# ─── STATEFULSET: MinIO Object Storage ─────────────────────────
+#
+# MinIO is S3-compatible object storage. In DocuMind, it can store
+# uploaded documents, making them accessible across all pods
+# (solving the shared file access problem from Phase 3).
+#
+# WHY STATEFULSET?
+# MinIO stores data on disk and needs stable identity for
+# clustering (multi-node mode). Same pattern as Qdrant/Neo4j.
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  labels:
+    app: minio
+    component: storage
+spec:
+  serviceName: minio-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+        component: storage
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:latest
+        imagePullPolicy: IfNotPresent
+
+        # ── COMMAND ──
+        # MinIO needs explicit server command + console port
+        args:
+        - server
+        - /data                    # Storage directory
+        - --console-address
+        - ":9001"                  # Web console on port 9001
+
+        ports:
+        - name: api
+          containerPort: 9000      # S3 API
+          protocol: TCP
+        - name: console
+          containerPort: 9001      # Web console
+          protocol: TCP
+
+        # ── CREDENTIALS FROM SECRET ──
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root_user
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root_password
+
+        volumeMounts:
+        - name: minio-data
+          mountPath: /data
+
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+        # ── HEALTH CHECKS ──
+        # MinIO has dedicated health endpoints
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+
+  volumeClaimTemplates:
+  - metadata:
+      name: minio-data
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 20Gi            # Document storage — generous for uploaded files
