@@ -26,10 +26,24 @@ data:
   NEO4J_USER: "neo4j"
   QDRANT_HOST: "qdrant-service"
   QDRANT_PORT: "6333"
+  
+  # ── LLM Configuration ──
+  # Priority chain order for automatic fallback:
+  # 1. GROQ       (if GROQ_API_KEY in env)
+  # 2. GEMINI     (elif GEMINI_API_KEY in env)
+  # 3. OPENAI     (elif OPENAI_API_KEY in env)
+  # 4. VLLM       (elif VLLM_BASE_URL in env)
+  # 5. OLLAMA     (final fallback)
+  # Override this explicitly by setting LLM_PROVIDER to a specific provider.
+  # 
+  # IMPORTANT: Do not store API keys here.
+  # Create a K8s secret and mount it in deployments:
+  # kubectl create secret generic documind-secrets --from-literal=GROQ_API_KEY=your_key_here
+  LLM_PROVIDER: "auto"
+  GROQ_MODEL: "qwen/qwen3-32b"
   OLLAMA_BASE_URL: "http://ollama-service:11434"
-
-  # ── Application Config ──
-  LLM_PROVIDER: "ollama"
+  OLLAMA_MODEL: "auto"
+  
   UPLOAD_FOLDER: "./uploads"
   # ── MinIO (Object Storage) ──
   MINIO_ENDPOINT: "minio-service:9000"

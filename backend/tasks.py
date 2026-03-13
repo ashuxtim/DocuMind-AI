@@ -72,6 +72,12 @@ def ingest_document_task(self, filename: str):
 
         # 7. SUCCESS STATE (Redis updated before Celery)
         state_manager.set_completed(filename)
+        # Fallback: write directly in case state_manager connection is stale
+        key = f"documind:file_status:{filename}"
+        from datetime import datetime
+        redis_client.hset(key, "status", "completed")
+        redis_client.hset(key, "completed_at", datetime.utcnow().isoformat())
+        print(f"✅ Direct Redis write: {filename} → completed")
         self.update_state(state='SUCCESS', meta={'status': 'Completed', 'filename': filename})
         return {"status": "completed", "filename": filename}
 

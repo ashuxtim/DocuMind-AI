@@ -16,7 +16,7 @@ export const endpoints = {
   documents: '/documents',
   delete: (filename) => `/delete/${filename}`,
   status: (taskId) => `/status/${taskId}`,
-  cancel: (taskId) => `/cancel/${taskId}`,
+  cancel: (filename) => `/cancel/${filename}`,
   query: '/query',
   summarize: (filename) => `/summarize/${filename}`,
   graph: '/graph',
@@ -38,7 +38,7 @@ export const deleteDocument = (filename) => api.delete(endpoints.delete(filename
 
 export const getTaskStatus = (taskId) => api.get(endpoints.status(taskId));
 
-export const cancelTask = (taskId) => api.post(endpoints.cancel(taskId));
+export const cancelTask = (filename) => api.post(endpoints.cancel(filename));
 
 // Chat/Query APIs
 export const queryKnowledgeBase = (data) => {

@@ -16,8 +16,6 @@ import {
 } from '@/ui/dialog';
 import { AnimatePresence } from 'framer-motion';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
-
 export function ChatPage() {
   const { selectedDocs, handleDelete } = useDocumentContext();
   const { messages, isLoading, sendMessage, clearChat } = useChatContext();
@@ -152,12 +150,24 @@ export function ChatPage() {
               </DialogTitle>
             </DialogHeader>
             <div className="flex-1 bg-muted">
-              {/* FIX: Append #page=X to the URL so browser jumps to specific page */}
-              <iframe
-                src={`${API_BASE_URL}/uploads/${pdfPreviewState.filename}#page=${pdfPreviewState.page}`}
-                className="w-full h-full"
-                title={pdfPreviewState.filename}
-              />
+              {pdfPreviewState.filename.toLowerCase().endsWith('.docx') ? (
+                <div className="flex flex-col items-center justify-center h-full gap-4">
+                  <FileText className="w-12 h-12 text-muted-foreground" />
+                  <p className="text-muted-foreground">Preview not available for Word documents</p>
+                  <a
+                    href={`/api/uploads/${pdfPreviewState.filename}`}
+                    download={pdfPreviewState.filename}
+                  >
+                    <Button variant="outline">Download File</Button>
+                  </a>
+                </div>
+              ) : (
+                <iframe
+                  src={`/api/uploads/${pdfPreviewState.filename}#page=${pdfPreviewState.page}`}
+                  className="w-full h-full"
+                  title={pdfPreviewState.filename}
+                />
+              )}
             </div>
           </DialogContent>
         </Dialog>

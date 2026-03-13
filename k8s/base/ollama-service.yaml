@@ -1,0 +1,20 @@
+# ─── SERVICE: Ollama LLM API ──────────────────────────────────
+# ClusterIP — internal only. FastAPI connects via "ollama-service:11434"
+# This DNS name is what you set in OLLAMA_BASE_URL in the ConfigMap.
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-service
+  labels:
+    app: ollama
+spec:
+  type: ClusterIP           # Internal only — never exposed via Ingress
+  selector:
+    app: ollama
+  ports:
+  - name: api
+    port: 11434
+    targetPort: 11434
+    protocol: TCP

@@ -1,0 +1,20 @@
+# ─── HEADLESS SERVICE: Ollama ─────────────────────────────────
+# Required by StatefulSet for stable pod DNS.
+# Enables: ollama-0.ollama-headless.default.svc.cluster.local
+# ────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-headless
+  labels:
+    app: ollama
+spec:
+  clusterIP: None           # This is what makes it "headless" — no virtual IP
+  selector:
+    app: ollama
+  ports:
+  - name: api
+    port: 11434
+    targetPort: 11434
+    protocol: TCP

@@ -44,16 +44,29 @@ spec:
         #     - configMapRef: documind-config  ← All keys become env vars
         envFrom:
         - configMapRef:
-            name: documind-config      # Injects: REDIS_URL, QDRANT_HOST, etc.
+            name: documind-config
         - secretRef:
-            name: documind-secrets     # Injects: NEO4J_PASSWORD, API keys
+            name: documind-secrets
+        - secretRef:
+            name: minio-credentials
+        env:
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root_user
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root_password
 
         resources:
           requests:
-            memory: "512Mi"
+            memory: "1Gi"
             cpu: "500m"
           limits:
-            memory: "1Gi"
+            memory: "2Gi"
             cpu: "1000m"
 
         livenessProbe:

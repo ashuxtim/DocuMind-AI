@@ -26,6 +26,23 @@ class MinIOStorage:
             region_name="us-east-1",  # MinIO ignores this but boto3 requires it
         )
 
+        try:
+            self.client.head_bucket(Bucket=self.bucket)
+            print(f"✅ MinIO bucket '{self.bucket}' already exists.")
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code")
+            if error_code == "404" or error_code == "NoSuchBucket":
+                print(f"⚠️ MinIO bucket '{self.bucket}' not found. Creating it now...")
+                try:
+                    self.client.create_bucket(Bucket=self.bucket)
+                    print(f"✅ MinIO bucket '{self.bucket}' created successfully.")
+                except Exception as create_err:
+                    print(f"❌ Failed to create MinIO bucket '{self.bucket}': {create_err}")
+            else:
+                print(f"❌ MinIO connection error during bucket check: {e}")
+        except Exception as e:
+            print(f"❌ MinIO error during startup check: {e}")
+
     def upload_file(self, filename: str, file_obj) -> str:
         """Upload a file-like object to MinIO. Returns the object key."""
         self.client.upload_fileobj(file_obj, self.bucket, filename)

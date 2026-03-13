@@ -1,9 +1,11 @@
 import os
+import re
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 from ollama import Client as OllamaClient
 import openai
 from google import genai
+import groq
 
 class LLMProvider(ABC):
     @abstractmethod
@@ -13,6 +15,34 @@ class LLMProvider(ABC):
     @abstractmethod
     def get_model_name(self) -> str:
         pass
+
+
+class GroqProvider(LLMProvider):
+    def __init__(self, api_key: str, model_name: str = "qwen/qwen3-32b"):
+        self.client = groq.Groq(api_key=api_key)
+        self.model_name = model_name
+
+    def generate(self, prompt: str, system_prompt: str = "") -> str:
+        messages = []
+        if system_prompt:
+            messages.append({'role': 'system', 'content': system_prompt})
+        messages.append({'role': 'user', 'content': prompt})
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=0,
+                max_tokens=4096
+            )
+            content = response.choices[0].message.content
+            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+            return content
+        except Exception as e:
+            return f"Groq Error: {str(e)}"
+
+    def get_model_name(self) -> str:
+        return self.model_name
 
 
 class OllamaProvider(LLMProvider):
@@ -163,14 +193,16 @@ class GeminiProvider(LLMProvider):
         if not api_key:
             raise ValueError("Gemini API Key is missing. Set GEMINI_API_KEY in .env")
         
-        genai.configure(api_key=api_key)
+        self.client = genai.Client(api_key=api_key)
         self.model_name = model_name
-        self.model = genai.GenerativeModel(model_name)
 
     def generate(self, prompt: str, system_prompt: str = "") -> str:
         try:
             full_prompt = f"System: {system_prompt}\nUser: {prompt}" if system_prompt else prompt
-            response = self.model.generate_content(full_prompt)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=full_prompt
+            )
             return response.text
         except Exception as e:
             return f"Gemini Error: {e}"
@@ -205,11 +237,29 @@ def get_llm_provider() -> LLMProvider:
         if _llm_instance is not None:
             return _llm_instance
         
-        provider_type = os.getenv("LLM_PROVIDER", "ollama").lower()
+        provider_type = os.getenv("LLM_PROVIDER", "auto").lower()
+        
+        # Priority-based auto-detection
+        if provider_type == "auto" or not provider_type:
+            if os.getenv("GROQ_API_KEY"):
+                provider_type = "groq"
+            elif os.getenv("GEMINI_API_KEY"):
+                provider_type = "gemini"
+            elif os.getenv("OPENAI_API_KEY"):
+                provider_type = "openai"
+            elif os.getenv("VLLM_BASE_URL"):
+                provider_type = "vllm"
+            else:
+                provider_type = "ollama"
         
         print(f"🔧 Initializing LLM Provider (SINGLETON): {provider_type}")
         
-        if provider_type == "vllm":
+        if provider_type == "groq":
+            _llm_instance = GroqProvider(
+                api_key=os.getenv("GROQ_API_KEY"),
+                model_name=os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
+            )
+        elif provider_type == "vllm":
             _llm_instance = VLLMProvider(
                 requested_model=os.getenv("VLLM_MODEL"), 
                 base_url=os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),

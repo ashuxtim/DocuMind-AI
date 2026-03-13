@@ -10,15 +10,22 @@ export function DocumentProvider({ children }) {
   const [uploadingFiles, setUploadingFiles] = useState(new Map());
 
   // Fetch documents
-  const fetchDocuments = useCallback(async () => {
+  const fetchDocuments = useCallback(async ({ showLoading = true } = {}) => {
     try {
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
       const response = await getDocuments();
-      setDocuments(response.data.documents || []);
+      const nextDocuments = response.data.documents || [];
+      setDocuments(nextDocuments);
+      return nextDocuments;
     } catch (error) {
       console.error('Failed to fetch documents:', error);
+      return null;
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -31,19 +38,37 @@ export function DocumentProvider({ children }) {
   useEffect(() => {
     const pollInterval = setInterval(async () => {
       const tasksToCheck = Array.from(uploadingFiles.entries());
+
+      if (tasksToCheck.length > 0) {
+        console.log('[DocumentPolling] Active tasks:', tasksToCheck);
+      }
       
       for (const [filename, taskId] of tasksToCheck) {
         try {
           const response = await getTaskStatus(taskId);
           const status = response.data.status;
+          console.log('[DocumentPolling] Status response:', { filename, taskId, status, data: response.data });
 
-          if (status === 'SUCCESS' || status === 'FAILURE') {
-            setUploadingFiles(prev => {
-              const newMap = new Map(prev);
-              newMap.delete(filename);
-              return newMap;
-            });
-            fetchDocuments();
+          if (status === 'SUCCESS' || status === 'FAILURE' || status === 'REVOKED') {
+            const nextDocuments = await fetchDocuments({ showLoading: false });
+            const latestDocument = nextDocuments?.find((doc) => doc.filename === filename);
+            const latestStatus = latestDocument?.status;
+            const isTerminalDocumentState = ['completed', 'failed', 'cancelled'].includes(latestStatus);
+
+            if (isTerminalDocumentState) {
+              setUploadingFiles(prev => {
+                const newMap = new Map(prev);
+                newMap.delete(filename);
+                return newMap;
+              });
+            } else {
+              console.warn('[DocumentPolling] Celery is terminal but /documents is not updated yet:', {
+                filename,
+                taskId,
+                celeryStatus: status,
+                documentStatus: latestStatus ?? 'missing',
+              });
+            }
           }
         } catch (error) {
           console.error(`Failed to check status for ${filename}:`, error);
@@ -61,6 +86,7 @@ export function DocumentProvider({ children }) {
       try {
         const response = await uploadDocument(file);
         const { task_id, filename } = response.data;
+        console.log('[DocumentUpload] Tracking task:', { filename, taskId: task_id, data: response.data });
         setUploadingFiles(prev => new Map(prev).set(filename, task_id));
       } catch (error) {
         console.error(`Failed to upload ${file.name}:`, error);
@@ -70,46 +96,37 @@ export function DocumentProvider({ children }) {
   }, []);
 
   const handleDelete = useCallback(async (filename) => {
-    if (!confirm(`Delete "${filename}"? This cannot be undone.`)) {
-      return;
-    }
-
-    try {
-      await deleteDocument(filename);
-      setDocuments(prev => prev.filter(doc => doc.filename !== filename));
-      setSelectedDocs(prev => prev.filter(name => name !== filename));
-    } catch (error) {
-      console.error(`Failed to delete ${filename}:`, error);
-      alert('Delete failed. Please try again.');
-    }
-  }, []);
+  if (!confirm(`Delete "${filename}"? This cannot be undone.`)) {
+    return;
+  }
+  try {
+    await deleteDocument(filename);
+    setDocuments(prev => prev.filter(doc => doc.filename !== filename));
+    setSelectedDocs(prev => prev.filter(name => name !== filename));
+    await fetchDocuments(); // re-sync with server after delete
+  } catch (error) {
+    console.error(`Failed to delete ${filename}:`, error);
+    alert('Delete failed. Please try again.');
+  }
+}, [fetchDocuments]);
 
   const handleCancel = useCallback(async (filename) => {
-    // Find the task_id for this filename
-    const taskId = Array.from(uploadingFiles.entries())
-      .find(([name]) => name === filename)?.[1];
-    
-    if (!taskId) {
-      console.warn('No task ID found for', filename);
-      return;
-    }
-
-    try {
-      // Use the centralized API wrapper instead of hardcoded fetch
-      await cancelTask(taskId);
-      
-      // Remove from uploading list
-      setUploadingFiles(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(filename);
-        return newMap;
-      });
-      
-      console.log(`Cancelled: ${filename}`);
-    } catch (error) {
-      console.error(`Failed to cancel ${filename}:`, error);
-    }
-  }, [uploadingFiles]);
+  try {
+    await cancelTask(filename);
+    // Full cleanup after cancel — same as delete
+    await deleteDocument(filename);
+    setUploadingFiles(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(filename);
+      return newMap;
+    });
+    setDocuments(prev => prev.filter(doc => doc.filename !== filename));
+    setSelectedDocs(prev => prev.filter(name => name !== filename));
+    await fetchDocuments();
+  } catch (error) {
+    console.error(`Failed to cancel ${filename}:`, error);
+  }
+}, [fetchDocuments]);
 
   const toggleSelection = useCallback((filename) => {
     setSelectedDocs(prev => {

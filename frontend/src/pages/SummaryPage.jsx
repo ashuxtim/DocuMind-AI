@@ -11,8 +11,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Card } from '@/ui/card';
 import { AnimatePresence, motion } from 'framer-motion';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
-
 export function SummaryPage() {
   const { documents, selectedDocs, loading, handleDelete } = useDocumentContext();
   const { generateSummary, loading: summaryLoading, summaries } = useSummaryContext();
@@ -169,11 +167,24 @@ export function SummaryPage() {
               </DialogTitle>
             </DialogHeader>
             <div className="flex-1 bg-muted">
-              <iframe
-                src={`${API_BASE_URL}/uploads/${previewDoc}`}
-                className="w-full h-full"
-                title={previewDoc}
-              />
+              {previewDoc.toLowerCase().endsWith('.docx') ? (
+                <div className="flex flex-col items-center justify-center h-full gap-4">
+                  <FileText className="w-12 h-12 text-muted-foreground" />
+                  <p className="text-muted-foreground">Preview not available for Word documents</p>
+                  <a
+                    href={`/api/uploads/${previewDoc}`}
+                    download={previewDoc}
+                  >
+                    <Button variant="outline">Download File</Button>
+                  </a>
+                </div>
+              ) : (
+                <iframe
+                  src={`/api/uploads/${previewDoc}`}
+                  className="w-full h-full"
+                  title={previewDoc}
+                />
+              )}
             </div>
           </DialogContent>
         </Dialog>

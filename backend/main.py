@@ -8,6 +8,7 @@ import asyncio
 import re
 from typing import List, Optional, Dict
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from ollama import Client
@@ -41,6 +42,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/uploads/{filename}")
+async def get_file(filename: str):
+    """Stream file from MinIO to browser via FastAPI proxy."""
+    try:
+        response = storage.client.get_object(
+            Bucket=storage.bucket,
+            Key=filename
+        )
+        mime = get_mime_type(filename)
+        return StreamingResponse(
+            response["Body"],
+            media_type=mime,
+            headers={"Content-Disposition": f"inline; filename={filename}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"File not found: {str(e)}")
 
 # --- HEALTH CHECK (for Kubernetes probes) ---
 @app.get("/health")
@@ -199,12 +217,8 @@ async def delete_document(filename: str):
     # 3. Clean up Redis State (Status Tracking)
     # We attempt to remove the 'processing/completed' status so it doesn't linger
     try:
-        # Assuming state_manager has a delete or we access the underlying redis
-        # If your state_manager class doesn't have delete_task, you can add it
-        # or simply ignore this if get_documents() relies solely on os.listdir()
-        if hasattr(state_manager, 'delete_task'):
-             state_manager.delete_task(filename)
-             results["steps"]["state"] = "cleared"
+        state_manager.redis_client.delete(f"documind:file_status:{filename}")
+        results["steps"]["state"] = "cleared"
     except Exception as e:
         results["steps"]["state"] = f"ignored: {str(e)}"
 
@@ -395,7 +409,7 @@ def _build_dashboard_data() -> dict:
     # MinIO
     minio_status = "unknown"
     try:
-        storage.client.head_bucket(Bucket=storage.bucket)
+        storage.client.list_buckets()
         minio_status = "connected"
     except Exception:
         minio_status = "disconnected"

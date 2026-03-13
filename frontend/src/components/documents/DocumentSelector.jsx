@@ -82,8 +82,8 @@ export function DocumentSelector({ isOpen, onClose, compact = false, onView, onD
       <Separator />
 
       {/* Document List */}
-      <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
+      <ScrollArea className="flex-1 overflow-visible">
+        <div className="p-2 pr-4 space-y-1">
           {filteredDocs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <FileText className="w-8 h-8 text-muted-foreground mb-2" />
@@ -103,7 +103,7 @@ export function DocumentSelector({ isOpen, onClose, compact = false, onView, onD
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: index * 0.02 }}
                   className={cn(
-                    "group w-full flex items-center gap-2 p-2 rounded-lg transition-smooth border",
+                    "group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2 rounded-lg transition-smooth border",
                     isSelected 
                       ? "bg-primary/10 border-primary/50" 
                       : "hover:bg-muted border-transparent"
@@ -113,7 +113,7 @@ export function DocumentSelector({ isOpen, onClose, compact = false, onView, onD
                   <button
                     onClick={() => isCompleted && toggleSelection(doc.filename)}
                     disabled={!isCompleted}
-                    className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                    className="flex min-w-0 items-center gap-3 text-left"
                   >
                     {/* Checkbox */}
                     <div
@@ -153,7 +153,7 @@ export function DocumentSelector({ isOpen, onClose, compact = false, onView, onD
 
                   {/* Actions (View & Delete) - Only show if completed/available */}
                   {isCompleted && (
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex shrink-0 items-center gap-1 pl-1">
                       {onView && (
                         <Button
                           variant="ghost"

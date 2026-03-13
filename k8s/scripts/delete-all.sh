@@ -44,6 +44,7 @@ kubectl delete -f k8s/base/qdrant-statefulset.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/neo4j-statefulset.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/minio-statefulset.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/redis-deployment.yaml --ignore-not-found=true
+kubectl delete -f k8s/base/ollama-statefulset.yaml --ignore-not-found=true
 echo -e "  ${GREEN}✅ StatefulSets removed (PVCs preserved)${NC}"
 
 # Step 4: Services
@@ -56,6 +57,8 @@ kubectl delete -f k8s/base/neo4j-headless-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/neo4j-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/minio-headless-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/minio-service.yaml --ignore-not-found=true
+kubectl delete -f k8s/base/ollama-headless-service.yaml --ignore-not-found=true
+kubectl delete -f k8s/base/ollama-service.yaml --ignore-not-found=true
 echo -e "  ${GREEN}✅ Services removed${NC}"
 
 # Step 5: ConfigMaps

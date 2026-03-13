@@ -54,14 +54,27 @@ spec:
             name: documind-config
         - secretRef:
             name: documind-secrets
+        - secretRef:
+            name: minio-credentials
+        env:
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root_user
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root_password
 
         resources:
           requests:
-            memory: "512Mi"
+            memory: "1Gi"
             cpu: "500m"
           limits:
-            memory: "1Gi"
-            cpu: "1000m"
+            memory: "3Gi"
+            cpu: "2000m"
 
       # ── SHARED UPLOADS VOLUME ──
       # The worker needs access to uploaded files for document processing.

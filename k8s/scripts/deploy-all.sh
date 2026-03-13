@@ -91,6 +91,8 @@ kubectl apply -f k8s/base/neo4j-service.yaml
 kubectl apply -f k8s/base/minio-headless-service.yaml
 kubectl apply -f k8s/base/minio-service.yaml
 kubectl apply -f k8s/base/fastapi-service.yaml
+kubectl apply -f k8s/base/ollama-headless-service.yaml
+kubectl apply -f k8s/base/ollama-service.yaml
 echo -e "  ${GREEN}✅ All services applied${NC}"
 echo ""
 
@@ -101,6 +103,7 @@ kubectl apply -f k8s/base/redis-deployment.yaml
 kubectl apply -f k8s/base/qdrant-statefulset.yaml
 kubectl apply -f k8s/base/neo4j-statefulset.yaml
 kubectl apply -f k8s/base/minio-statefulset.yaml
+kubectl apply -f k8s/base/ollama-statefulset.yaml
 
 echo "  Waiting for databases to be ready..."
 kubectl wait --for=condition=ready pod -l app=redis --timeout=120s 2>/dev/null && \
@@ -114,6 +117,10 @@ kubectl wait --for=condition=ready pod -l app=neo4j --timeout=180s 2>/dev/null &
 
 kubectl wait --for=condition=ready pod -l app=minio --timeout=120s 2>/dev/null && \
     echo -e "  ${GREEN}✅ MinIO ready${NC}" || echo -e "  ${RED}❌ MinIO timeout${NC}"
+
+echo "  ⏳ Waiting for Ollama (model loading — this takes 2-3 minutes on first run)..."
+kubectl wait --for=condition=ready pod -l app=ollama --timeout=300s 2>/dev/null && \
+    echo -e "  ${GREEN}✅ Ollama ready${NC}" || echo -e "  ${YELLOW}⚠️  Ollama still loading — check with: kubectl logs ollama-0${NC}"
 echo ""
 
 # ── STEP 4: Deployments (app layer — needs databases) ──

@@ -14,8 +14,6 @@ import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button'; // Needed for Cancel button
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/ui/dialog';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
-
 export function DocumentsPage() {
   const {
     documents,
@@ -47,7 +45,7 @@ export function DocumentsPage() {
   return (
     <div className="h-full flex overflow-hidden">
       {/* Left Panel - Document List */}
-      <div className="w-96 flex flex-col flex-shrink-0">
+      <div className="relative z-10 w-96 flex flex-col flex-shrink-0">
         {/* Header Section */}
         <div className="p-4 flex-shrink-0 bg-card border-r border-border">
           <div className="flex items-center justify-between mb-4">
@@ -64,7 +62,7 @@ export function DocumentsPage() {
         <Separator className="flex-shrink-0" />
 
         {/* List Section */}
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-visible flex flex-col">
            {/* This Sidebar component already uses FileProcessing internally now! */}
            <DocumentSelector 
              isOpen={true} 
@@ -155,11 +153,24 @@ export function DocumentsPage() {
               </DialogTitle>
             </DialogHeader>
             <div className="flex-1 bg-muted">
-              <iframe
-                src={`${API_BASE_URL}/uploads/${activePdf}`}
-                className="w-full h-full"
-                title={activePdf}
-              />
+              {activePdf.toLowerCase().endsWith('.docx') ? (
+                <div className="flex flex-col items-center justify-center h-full gap-4">
+                  <FileText className="w-12 h-12 text-muted-foreground" />
+                  <p className="text-muted-foreground">Preview not available for Word documents</p>
+                  <a
+                    href={`/api/uploads/${activePdf}`}
+                    download={activePdf}
+                  >
+                    <Button variant="outline">Download File</Button>
+                  </a>
+                </div>
+              ) : (
+                <iframe
+                  src={`/api/uploads/${activePdf}`}
+                  className="w-full h-full"
+                  title={activePdf}
+                />
+              )}
             </div>
           </DialogContent>
         </Dialog>
