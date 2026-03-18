@@ -25,9 +25,12 @@ export function UploadZone({ onUpload, disabled }) {
     if (disabled) return;
 
     const files = Array.from(e.dataTransfer.files).filter(file => 
-      file.name.endsWith('.pdf') || 
-      file.name.endsWith('.txt') || 
-      file.name.endsWith('.docx')
+      file.name.endsWith('.pdf') ||
+      file.name.endsWith('.txt') ||
+      file.name.endsWith('.docx') ||
+      file.name.endsWith('.md') ||
+      file.name.endsWith('.html') ||
+      file.name.endsWith('.htm')
     );
 
     if (files.length > 0) {
@@ -68,7 +71,7 @@ export function UploadZone({ onUpload, disabled }) {
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,.txt,.docx"
+        accept=".pdf,.txt,.docx,.md,.html,.htm"
         onChange={handleFileSelect}
         className="hidden"
         disabled={disabled}

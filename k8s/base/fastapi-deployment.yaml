@@ -23,25 +23,13 @@ spec:
       containers:
       - name: fastapi
         image: documind-fastapi:v1.1
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Never
 
         ports:
         - name: http
           containerPort: 8000
           protocol: TCP
 
-        # ── ENVIRONMENT FROM CONFIGMAP & SECRET ──
-        # envFrom injects ALL keys from the ConfigMap/Secret as env vars.
-        # This replaces the manual "env:" list from Phase 2.
-        #
-        # BEFORE (Phase 2):
-        #   env:
-        #     - name: REDIS_URL
-        #       value: "redis://redis-service:6379/0"  ← Hardcoded
-        #
-        # AFTER (Phase 3):
-        #   envFrom:
-        #     - configMapRef: documind-config  ← All keys become env vars
         envFrom:
         - configMapRef:
             name: documind-config
@@ -73,7 +61,7 @@ spec:
           httpGet:
             path: /health
             port: 8000
-          initialDelaySeconds: 120
+          initialDelaySeconds: 60
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
@@ -82,7 +70,16 @@ spec:
           httpGet:
             path: /health
             port: 8000
-          initialDelaySeconds: 90
+          initialDelaySeconds: 45
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 2
+
+        volumeMounts:
+        - name: model-cache
+          mountPath: /root/.cache/huggingface
+
+      volumes:
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache

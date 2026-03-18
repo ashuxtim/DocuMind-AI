@@ -21,7 +21,7 @@ metadata:
     app: worker
     component: backend
 spec:
-  replicas: 1               # Start with 1 worker — scale up if queue builds up
+  replicas: 1
   selector:
     matchLabels:
       app: worker
@@ -33,22 +33,18 @@ spec:
     spec:
       containers:
       - name: worker
-        image: documind-fastapi:v1.1       # Same image as FastAPI!
-        imagePullPolicy: IfNotPresent
+        image: documind-fastapi:v1.1
+        imagePullPolicy: Never
 
-        # ── OVERRIDE THE DEFAULT COMMAND ──
-        # The Dockerfile CMD is "uvicorn main:app ..."
-        # We override it to run Celery instead.
         command: ["celery"]
         args:
           - "-A"
           - "celery_app.celery_app"
           - "worker"
           - "--loglevel=info"
-          - "--concurrency=2"              # Limit concurrent tasks (save RAM)
+          - "--concurrency=1"
+          - "--pool=solo"
 
-        # ── SHARED CONFIG ──
-        # Same ConfigMap & Secret as FastAPI — one source of truth!
         envFrom:
         - configMapRef:
             name: documind-config
@@ -70,21 +66,21 @@ spec:
 
         resources:
           requests:
-            memory: "1Gi"
+            memory: "2Gi"
             cpu: "500m"
           limits:
             memory: "3Gi"
             cpu: "2000m"
 
-      # ── SHARED UPLOADS VOLUME ──
-      # The worker needs access to uploaded files for document processing.
-      # For now, use an emptyDir. In Phase 4+, you'd use a shared PVC (RWX)
-      # or object storage (MinIO/S3) for true multi-pod file sharing.
         volumeMounts:
         - name: uploads
           mountPath: /app/uploads
+        - name: model-cache
+          mountPath: /root/.cache/huggingface
 
       volumes:
       - name: uploads
-        emptyDir: {}          # Temporary — files won't survive pod restarts
-                              # This is fine for now since uploads are also on the API pod
+        emptyDir: {}
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache

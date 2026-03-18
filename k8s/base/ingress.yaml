@@ -27,6 +27,7 @@ metadata:
     nginx.ingress.kubernetes.io/rewrite-target: /$2
     # Don't redirect HTTP to HTTPS (no TLS for local dev)
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
 spec:
   ingressClassName: nginx         # Use the NGINX Ingress Controller
 

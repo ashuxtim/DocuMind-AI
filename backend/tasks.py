@@ -1,95 +1,116 @@
 import os
 import asyncio
+from datetime import datetime
+from typing import Optional
 import redis
 from celery.exceptions import Ignore
 from celery_app import celery_app
-from state_manager import state_manager
-from ingest import DocuMindIngest
-from minio_storage import MinIOStorage
 
-# 🔴 FIX: Environment-driven Redis URL for Docker/Kubernetes compatibility
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-# decode_responses=False is often safer for distributed locks depending on the redis-py version, 
-# but we will rely on standard instantiation here.
-redis_client = redis.Redis.from_url(REDIS_URL)
+# ── Module-level singletons ───────────────────────────────────────────────────
+# Populated by worker_process_init signal in celery_app.py.
+# None until worker process initialises — never instantiated at import time.
+state_manager = None
+_ingestor      = None
+_minio         = None
+_event_loop    = None
+
+REDIS_URL   = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+
+CLOUD_PROVIDERS = {"vllm", "openai", "gemini", "groq", "anthropic", "cohere", "nvidia"}
+
+
+def _run_async(coro):
+    """
+    Safely run an async coroutine from sync Celery context.
+    Reuses the persistent per-worker event loop set in worker_process_init.
+    Falls back to asyncio.run() if no loop is available (e.g. test context).
+    """
+    global _event_loop
+    if _event_loop is not None and not _event_loop.is_closed():
+        return _event_loop.run_until_complete(coro)
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, coro)
+                return future.result()
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
+
 
 @celery_app.task(bind=True, name="ingest_document")
 def ingest_document_task(self, filename: str):
     """
     Celery task wrapper for document ingestion.
-    Implements distributed GPU locking, cooperative cancellation, and state sync.
+    GPU lock is conditional — only acquired for local providers (Ollama, vLLM).
+    Cloud providers (Groq, NVIDIA, OpenAI) skip the lock entirely.
     """
-    # 1. Update state to PROCESSING
-    self.update_state(state='PROCESSING', meta={'progress': 0, 'status': 'Waiting for GPU...'})
+    # Guard — ensure worker_process_init has fired before using singletons
+    if state_manager is None or _ingestor is None or _minio is None:
+        raise RuntimeError("Worker not initialised — worker_process_init signal may not have fired.")
+
+    self.update_state(state='PROCESSING', meta={'progress': 0, 'status': 'Starting ingestion...'})
     state_manager.set_processing(filename, self.request.id)
 
-    # 2. Cooperative Cancellation Token
     def check_if_cancelled():
         status_data = state_manager.get_status(filename)
         return status_data is not None and status_data.get("status") == "cancelled"
 
-    # 3. Configure the Distributed GPU Lock
-    # timeout=1800 (30 mins): Ensures heavy PDFs don't lose the lock mid-process
-    # blocking_timeout=600 (10 mins): Allows workers to queue up gracefully rather than crashing
-    lock_name = "documind_gpu_lock"
-    gpu_lock = redis_client.lock(
-        lock_name,
-        timeout=1800,
-        blocking=True,
-        blocking_timeout=600
-    )
+    # Determine if GPU lock is needed
+    provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+    needs_lock = provider not in CLOUD_PROVIDERS
 
-    try:
-        # 4. Acquire the Lock BEFORE initializing heavy GPU/LLM components
-        acquired = gpu_lock.acquire()
-        if not acquired:
-            raise RuntimeError("GPU lock acquisition timed out. Workers are heavily backlogged.")
-
-        self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'GPU Acquired. Starting ingestion...'})
-        
-        # 🔴 FIX: Instantiate AFTER lock to protect GPU memory
-        ingestor = DocuMindIngest()
-
-        # Download file from MinIO to temp path for parsing
-        minio = MinIOStorage()
-        file_path = minio.download_to_temp(filename)
-
-        # 5. Hardened Async Execution Block
-        result = asyncio.run(
-            ingestor.process_document(
-                file_path=file_path,
-                filename=filename,
-                cancellation_token=check_if_cancelled
-            )
+    gpu_lock = None
+    if needs_lock:
+        gpu_lock = redis_client.lock(
+            "ollama_inference_lock",
+            timeout=1800,
+            blocking=True,
+            blocking_timeout=600
         )
 
-        # 6. Translate legacy string returns into proper exceptions defensively
-        if isinstance(result, str):
-            if result == "cancelled":
-                raise asyncio.CancelledError("Task was cancelled by user via API.")
-            if result.startswith("Parsing failed") or result == "empty_file":
-                raise ValueError(f"Document parsing failed: {result}")
+    try:
+        # Acquire lock only for local providers
+        if needs_lock:
+            acquired = gpu_lock.acquire()
+            if not acquired:
+                raise RuntimeError("GPU lock acquisition timed out — workers heavily backlogged.")
+            self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Lock acquired. Starting...'})
+        else:
+            self.update_state(state='PROCESSING', meta={'progress': 5, 'status': 'Ingesting...'})
 
-        # 7. SUCCESS STATE (Redis updated before Celery)
+        # Surgical fix — context manager guarantees temp file cleanup even if
+        # process_document raises.  Replaces download_to_temp + finally block.
+        with _minio.temp_download(filename) as file_path:
+            result = _run_async(
+                _ingestor.process_document(
+                    file_path=file_path,
+                    filename=filename,
+                    cancellation_token=check_if_cancelled
+                )
+            )
+
+            if isinstance(result, str):
+                if result == "cancelled":
+                    raise asyncio.CancelledError("Cancelled by user.")
+                if result.startswith("Parsing failed") or result == "empty_file":
+                    raise ValueError(f"Document parsing failed: {result}")
+
+        # Single source of truth — StateManager handles its own reconnect
         state_manager.set_completed(filename)
-        # Fallback: write directly in case state_manager connection is stale
-        key = f"documind:file_status:{filename}"
-        from datetime import datetime
-        redis_client.hset(key, "status", "completed")
-        redis_client.hset(key, "completed_at", datetime.utcnow().isoformat())
-        print(f"✅ Direct Redis write: {filename} → completed")
+        state_manager.invalidate_cache("cache:dashboard_graph")  # ← add this line
         self.update_state(state='SUCCESS', meta={'status': 'Completed', 'filename': filename})
         return {"status": "completed", "filename": filename}
 
     except asyncio.CancelledError:
-        # 8. CANCELLED STATE (Clean Revocation)
-        print(f"🚫 Task intentionally aborted for {filename}")
         state_manager.set_cancelled(filename)
         self.update_state(state='REVOKED', meta={'status': 'Cancelled by user'})
         raise Ignore()
 
     except Exception as e:
-        # 9. FAILED STATE
         error_msg = str(e)
         print(f"❌ Task failed for {filename}: {error_msg}")
         state_manager.set_failed(filename, error_msg)
@@ -97,18 +118,11 @@ def ingest_document_task(self, filename: str):
         raise
 
     finally:
-        # 10. CRASH-SAFE LOCK RELEASE
-        # Guaranteed to release the GPU whether we succeed, fail, or get cancelled
-        try:
-            if 'file_path' in locals() and os.path.exists(file_path):
-                os.remove(file_path)
-                print(f"🗑️ Temp file cleaned: {file_path}")
-        except Exception as e:
-            print(f"⚠️ Temp file cleanup warning: {e}")
-        try:
-            # Check if this specific worker still owns the lock before releasing
-            if gpu_lock.locked() and gpu_lock.owned():
-                gpu_lock.release()
-                print(f"🔓 GPU lock released for {filename}")
-        except Exception as e:
-            print(f"⚠️ Failed to gracefully release GPU lock for {filename}: {e}")
+        # Lock release — only if lock was acquired
+        if needs_lock and gpu_lock is not None:
+            try:
+                if gpu_lock.owned():
+                    gpu_lock.release()
+                    print(f"🔓 GPU lock released for {filename}")
+            except Exception as e:
+                print(f"⚠️ Failed to release GPU lock for {filename}: {e}")

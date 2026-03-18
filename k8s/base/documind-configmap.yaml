@@ -39,7 +39,7 @@ data:
   # IMPORTANT: Do not store API keys here.
   # Create a K8s secret and mount it in deployments:
   # kubectl create secret generic documind-secrets --from-literal=GROQ_API_KEY=your_key_here
-  LLM_PROVIDER: "auto"
+  LLM_PROVIDER: "nvidia"
   GROQ_MODEL: "qwen/qwen3-32b"
   OLLAMA_BASE_URL: "http://ollama-service:11434"
   OLLAMA_MODEL: "auto"

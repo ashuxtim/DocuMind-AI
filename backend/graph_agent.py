@@ -1,129 +1,526 @@
+import os
+import re
 import json
-from typing import List, Dict, Any
+import asyncio
+import logging
+from functools import lru_cache
+from typing import List, Dict, Optional, Tuple
 from llm_provider import get_llm_provider
 from langsmith import traceable
 
+logger = logging.getLogger(__name__)
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+
+ALLOWED_NODE_TYPES = {
+    "Person", "Organization", "Location", "Technology", "Product",
+    "Event", "Concept", "Document", "Law", "Date", "Amount"
+}
+
+# ALLOWED_EDGE_TYPES removed — LLM generates freely with formatting rules
+# Edge normalisation pass handles consistency after extraction
+
+EXTRACTION_PROMPT = """
+You are a graph extraction engine. Your only job is to extract entities and
+relationships from the text and return them as a JSON graph.
+
+RULES:
+1. Extract only entities that are explicitly mentioned in the text.
+   Do not infer or add entities not present in the text.
+2. Only extract NAMED, SPECIFIC entities — proper nouns, named people, named
+   organizations, specific products, specific technologies, specific locations.
+   NEVER extract generic nouns like "entities", "liabilities", "partners",
+   "commitments", "team members", "shareholders", "management", "board",
+   or any other common noun that is not a specific named thing.
+3. Use only these node types: Person, Organization, Location, Technology,
+   Product, Event, Concept, Document, Law, Date, Amount
+4. For Person entities: ALWAYS use the full formal name.
+   Never use surnames alone ("Chen"), initials alone ("S. Chen"),
+   or citation format ("Chen, S."). Always write "Dr. Sarah Chen" not "Chen".
+5. Relationship types MUST follow ALL of these rules:
+   - SCREAMING_SNAKE_CASE only (e.g. WORKS_AT, FOUNDED_BY, DISPUTES_WITH)
+   - 1 to 4 words maximum
+   - Active verb form: ACQUIRED_BY not ACQUISITION_OF
+   - Be specific: DISPUTES_WITH is better than RELATED_TO
+   - Use RELATED_TO only as absolute last resort when nothing specific fits
+   - NEVER invent vague types like HAS_COMMERCIAL_ENGAGEMENT_WITH
+6. Every edge source_id and target_id must match an id in the nodes list.
+7. Node id must be snake_case of the name. Node name must be Title Case.
+8. Return ONLY valid JSON. No explanation. No markdown. No extra text.
+
+OUTPUT SCHEMA:
+{{"nodes": [{{"id": "...", "type": "...", "name": "...", "properties": {{}}}}],
+  "edges": [{{"source_id": "...", "target_id": "...", "type": "...", "properties": {{}}}}]}}
+
+EXAMPLE INPUT:
+"Elon Musk founded Tesla in 2003. The company is headquartered in Austin."
+
+EXAMPLE OUTPUT:
+{{
+  "nodes": [
+    {{"id": "elon_musk", "type": "Person", "name": "Elon Musk", "properties": {{}}}},
+    {{"id": "tesla", "type": "Organization", "name": "Tesla", "properties": {{}}}},
+    {{"id": "austin", "type": "Location", "name": "Austin", "properties": {{}}}},
+    {{"id": "2003", "type": "Date", "name": "2003", "properties": {{}}}}
+  ],
+  "edges": [
+    {{"source_id": "elon_musk", "target_id": "tesla", "type": "FOUNDED_BY", "properties": {{}}}},
+    {{"source_id": "tesla", "target_id": "austin", "type": "LOCATED_IN", "properties": {{}}}},
+    {{"source_id": "tesla", "target_id": "2003", "type": "DATED", "properties": {{}}}}
+  ]
+}}
+
+TEXT:
+{chunk_text}
+""".strip()
+
+QUERY_PROMPT = """
+Extract search keywords from this question for a knowledge graph lookup.
+Return ONLY a JSON array of 3-8 entity names.
+Example: ["Elon Musk", "Tesla", "2003"]
+JSON array:
+{question}
+""".strip()
+
+COREF_PROMPT = """
+The following name groups were extracted from a single document and may refer to the same person or organization.
+Each inner list is a group of names that rapidfuzz has already identified as potentially the same entity.
+For each group, identify the canonical (most complete, most formal) name.
+
+Return ONLY a JSON object mapping each non-canonical name to its canonical form.
+Do not include canonical names as keys — only include names that need to be remapped.
+
+Example:
+Input: [["Chen", "Chen, S.", "Dr. Sarah Chen"], ["Smith", "J. Smith"]]
+Output: {{"Chen": "Dr. Sarah Chen", "Chen, S.": "Dr. Sarah Chen", "Smith": "J. Smith"}}
+
+Name groups to resolve:
+{name_list}
+
+JSON object:
+""".strip()
+
+EDGE_NORMALISE_PROMPT = """
+The following relationship types were extracted from a document.
+Some may be duplicates or near-synonyms that should be consolidated.
+For each group of similar types, identify the best canonical form.
+
+Return ONLY a JSON object mapping non-canonical types to their canonical form.
+Do not include canonical types as keys.
+
+Example:
+Input: ["ACQUIRES", "ACQUIRED_BY", "HAS_ACQUIRED", "ACQUISITION_OF"]
+Output: {{"ACQUIRES": "ACQUIRED_BY", "HAS_ACQUIRED": "ACQUIRED_BY", "ACQUISITION_OF": "ACQUIRED_BY"}}
+
+Relationship types:
+{edge_types}
+
+JSON object:
+""".strip()
+
+
+# ── Normalisation ─────────────────────────────────────────────────────────────
+
+def _normalise_node(node: dict) -> dict:
+    name = " ".join(node["name"].strip().split()).title()
+    node_id = re.sub(r"[^a-z0-9_]", "", name.lower().replace(" ", "_").replace("-", "_"))
+    node_type = node["type"] if node["type"] in ALLOWED_NODE_TYPES else "Concept"
+    if node_type != node["type"]:
+        logger.warning("Remapped unknown node type '%s' to Concept", node["type"])
+    return {**node, "name": name, "id": node_id, "type": node_type}
+
+
+def _normalise_edge(edge: dict) -> dict:
+    """Normalise edge type to SCREAMING_SNAKE_CASE. No allowed-list check."""
+    raw = edge["type"].strip().upper()
+    normalised = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
+    return {**edge, "type": normalised}
+
+
+# ── Validation ────────────────────────────────────────────────────────────────
+
+def _validate_graph(raw: dict) -> dict | None:
+    if not isinstance(raw.get("nodes"), list) or not isinstance(raw.get("edges"), list):
+        return None
+
+    nodes = []
+    for n in raw["nodes"]:
+        if not isinstance(n, dict):
+            return None
+        if not all(k in n for k in ("id", "type", "name")):
+            return None
+        nodes.append(_normalise_node(n))
+
+    valid_ids = {n["id"] for n in nodes}
+
+    edges = []
+    for e in raw["edges"]:
+        if not isinstance(e, dict):
+            continue
+        e = _normalise_edge(e)
+        if e.get("source_id") in valid_ids and e.get("target_id") in valid_ids:
+            edges.append(e)
+        else:
+            logger.warning("Removed dangling edge: %s -> %s",
+                           e.get("source_id"), e.get("target_id"))
+
+    return {"nodes": nodes, "edges": edges}
+
+
+# ── Entity Registry ───────────────────────────────────────────────────────────
+
+def _build_entity_registry(
+    all_graphs: List[dict],
+    target_types: set = None
+) -> Tuple[Dict[str, str], List[List[str]]]:
+    """
+    Cluster similar entity names using rapidfuzz.
+    Returns:
+        auto_registry: high-confidence mappings (>= 85 similarity) — no LLM needed
+        ambiguous_clusters: uncertain clusters (60-84 similarity) — needs LLM
+    """
+    from rapidfuzz import fuzz
+
+    if target_types is None:
+        target_types = {"Person", "Organization"}
+
+    # Collect all unique names for target types across all chunks
+    name_set: Dict[str, str] = {}  # name → type
+    for graph in all_graphs:
+        for node in graph.get("nodes", []):
+            if node["type"] in target_types:
+                name_set[node["name"]] = node["type"]
+
+    names = list(name_set.keys())
+    if len(names) < 2:
+        return {}, []
+
+    # Cluster by token_sort_ratio similarity
+    assigned = set()
+    clusters: List[List[str]] = []
+
+    for i, name_a in enumerate(names):
+        if name_a in assigned:
+            continue
+        cluster = [name_a]
+        assigned.add(name_a)
+        for name_b in names[i + 1:]:
+            if name_b in assigned:
+                continue
+            if fuzz.token_sort_ratio(name_a, name_b) >= 60:
+                cluster.append(name_b)
+                assigned.add(name_b)
+        if len(cluster) > 1:
+            clusters.append(cluster)
+
+    auto_registry: Dict[str, str] = {}
+    ambiguous_clusters: List[List[str]] = []
+
+    for cluster in clusters:
+        # Max pairwise similarity in this cluster
+        max_sim = max(
+            fuzz.token_sort_ratio(cluster[i], cluster[j])
+            for i in range(len(cluster))
+            for j in range(i + 1, len(cluster))
+        )
+        # Canonical = longest name (most qualified form)
+        canonical = max(cluster, key=len)
+
+        if max_sim >= 85:
+            for name in cluster:
+                if name != canonical:
+                    auto_registry[name] = canonical
+            logger.info("Auto-merged → '%s': %s", canonical, cluster)
+        else:
+            ambiguous_clusters.append(cluster)
+
+    return auto_registry, ambiguous_clusters
+
+
+def _apply_registry_to_graphs(
+    all_graphs: List[dict],
+    registry: Dict[str, str]
+) -> List[dict]:
+    """
+    Rewrite node names and ids across all graphs using the registry.
+    Updates all edge source_id and target_id to match new ids.
+    Deduplicates nodes that resolve to the same canonical name.
+    """
+    if not registry:
+        return all_graphs
+
+    def to_id(name: str) -> str:
+        return re.sub(r"[^a-z0-9_]", "",
+                      name.lower().replace(" ", "_").replace("-", "_"))
+
+    updated_graphs = []
+    for graph in all_graphs:
+        id_remap: Dict[str, str] = {}  # old_id → new_id
+
+        new_nodes = []
+        for node in graph.get("nodes", []):
+            old_name = node["name"]
+            new_name = registry.get(old_name, old_name)
+            new_id = to_id(new_name)
+            old_id = node["id"]
+            if old_id != new_id:
+                id_remap[old_id] = new_id
+            new_nodes.append({**node, "name": new_name, "id": new_id})
+
+        # Deduplicate nodes merged to same id — keep first occurrence
+        seen: Dict[str, bool] = {}
+        deduped_nodes = []
+        for node in new_nodes:
+            if node["id"] not in seen:
+                seen[node["id"]] = True
+                deduped_nodes.append(node)
+
+        # Remap edges to new ids, drop dangling
+        valid_ids = {n["id"] for n in deduped_nodes}
+        new_edges = []
+        for edge in graph.get("edges", []):
+            src = id_remap.get(edge["source_id"], edge["source_id"])
+            tgt = id_remap.get(edge["target_id"], edge["target_id"])
+            if src in valid_ids and tgt in valid_ids and src != tgt:
+                new_edges.append({**edge, "source_id": src, "target_id": tgt})
+
+        updated_graphs.append({"nodes": deduped_nodes, "edges": new_edges})
+
+    return updated_graphs
+
+
+# ── GraphBuilder ──────────────────────────────────────────────────────────────
+
 class GraphBuilder:
     def __init__(self):
-        # 1. Get the configured provider (Ollama, OpenAI, vLLM, etc.)
-        # This abstraction allows swapping hardware without changing this file.
         self.llm = get_llm_provider()
         self.model_name = self.llm.get_model_name()
         print(f"🤖 GraphBuilder initialized with: {self.model_name}")
 
+        if not os.getenv("LANGCHAIN_API_KEY"):
+            print("⚠️  LangSmith tracing DISABLED — LANGCHAIN_API_KEY not set")
+        else:
+            print("✅ LangSmith tracing enabled")
+
+    def _parse_json_dict(self, response: str) -> dict:
+        clean = re.sub(r'```(?:json)?', '', response).strip()
+        match = re.search(r'\{.*\}', clean, re.DOTALL)
+        if not match:
+            return {}
+        try:
+            result = json.loads(match.group())
+            return result if isinstance(result, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+    def _parse_json_list(self, response: str) -> list:
+        clean = re.sub(r'```(?:json)?', '', response).strip()
+        match = re.search(r'\[.*\]', clean, re.DOTALL)
+        if not match:
+            return []
+        try:
+            result = json.loads(match.group())
+            return result if isinstance(result, list) else []
+        except json.JSONDecodeError:
+            return []
+
     @traceable(name="graph_extraction")
-    def extract_relationships(self, text_chunk: str) -> List[Dict[str, Any]]:
+    def extract_relationships(
+        self,
+        text_chunk: str,
+        chunk_id: str = "",
+        document_id: str = ""
+    ) -> dict:
         """
-        Extracts entities and relationships with TEMPORAL GROUNDING + CORROBORATION.
+        Full extraction pipeline for one chunk.
+        Returns graph dict {nodes, edges} ready for ingest_graph().
+        Never raises — returns empty graph on total failure.
         """
-        system_prompt = """You are a Financial Knowledge Graph Extraction Expert.
+        prompt = EXTRACTION_PROMPT.format(chunk_text=text_chunk)
 
-        EXTRACTION RULES:
-        1. **Temporal Grounding**: EVERY numerical value MUST include its time period in the subject/object
-        - ❌ BAD: {"subject": "Revenue", "object": "$10M"}
-        - ✅ GOOD: {"subject": "Q1 2024 Revenue", "object": "$10M"}
+        for attempt in range(3):
+            try:
+                raw_text = self.llm.generate(prompt)
+                raw = self._parse_json_dict(raw_text)
+                graph = _validate_graph(raw)
 
-        2. **Revision Detection**: If text says "restated", "revised", "corrected", "updated":
-        - Use predicate: "REVISED_TO" or "SUPERSEDES"
-        - Example: {"subject": "Q1 Original Revenue $8M", "predicate": "REVISED_TO", "object": "Q1 Restated Revenue $7M"}
+                if graph is not None:
+                    for node in graph["nodes"]:
+                        node["properties"]["document_id"] = document_id
+                        node["properties"]["chunk_id"] = chunk_id
+                    for edge in graph["edges"]:
+                        edge["properties"]["document_id"] = document_id
+                        edge["properties"]["chunk_id"] = chunk_id
+                    return graph
 
-        3. **Corroboration Strength**:
-        - HIGH: Explicit in same sentence ("Revenue was $10M in Q1")
-        - MEDIUM: Implied across sentences
-        - LOW: Inferred from context
+                logger.warning("Validation failed attempt %d chunk %s", attempt + 1, chunk_id)
 
-        4. **Entity Naming**: Be specific
-        - Use "Apple Q1 2024 Revenue" not "Revenue"
-        - Use "CEO as of Jan 2024" not "CEO"
+            except json.JSONDecodeError as e:
+                logger.warning("JSON parse failed attempt %d chunk %s: %s",
+                               attempt + 1, chunk_id, e)
+            except Exception as e:
+                logger.warning("LLM call failed attempt %d chunk %s: %s",
+                               attempt + 1, chunk_id, e)
 
-        5. **Comparison Relations**: For "increased from X to Y":
-        - {"subject": "Q1 Revenue", "predicate": "INCREASED_TO", "object": "Q2 Revenue", "period": "2024"}
-        
-        6. **Adversarial Detection (CRITICAL):**
-            - If a statement explicitly **NEGATES**, **REVISES**, or **SUPERSEDES** a previous fact, you MUST use those exact verbs as the predicate.
-            - Example: "The $10M figure was incorrect and restated to $8M."
-              -> {"subject": "$10M", "predicate": "REVISED_TO", "object": "$8M", "corroboration": "HIGH"}
-        
-        OUTPUT FORMAT (JSON List):
-        [
-            {
-                "subject": "Entity Name", 
-                "predicate": "RELATIONSHIP_TYPE", 
-                "object": "Target Entity/Value",
-                "period": "Q1 2024",      // Optional, extract if present
-                "corroboration": "HIGH"   // Optional, defaults to MEDIUM
-            }
-        ]
+        logger.error("Graph extraction failed after 3 attempts for chunk %s", chunk_id)
+        return {"nodes": [], "edges": []}
+
+    async def extract_relationships_batch(
+        self,
+        chunks: List[str],
+        concurrency: int = 5
+    ) -> List[dict]:
+        sem = asyncio.Semaphore(concurrency)
+
+        async def extract_one(chunk: str) -> dict:
+            async with sem:
+                return await asyncio.to_thread(self.extract_relationships, chunk)
+
+        results = await asyncio.gather(*[extract_one(c) for c in chunks])
+        return list(results)
+
+    def _resolve_ambiguous_with_llm(
+        self,
+        ambiguous_clusters: List[List[str]]
+    ) -> Dict[str, str]:
         """
+        Send ambiguous name clusters to LLM for coreference resolution.
+        Only called for clusters where rapidfuzz confidence is 60-84.
+        Returns registry additions from LLM disambiguation.
+        """
+        if not ambiguous_clusters:
+            return {}
 
-        prompt = f"""Extract structured data from this text. 
-        Focus on attaching TIME PERIODS and detecting CORROBORATION strength.
-        
-        Text:
-        {text_chunk}
-        
-        Return JSON list only."""
-        
+        prompt = COREF_PROMPT.format(name_list=json.dumps(ambiguous_clusters, indent=2))
+
+
         try:
-            # print(f"      Verify: Sending {len(text_chunk)} chars to {self.model_name}...")
-            response_text = self.llm.generate(prompt, system_prompt)
-            
-            clean_json = response_text.replace("```json", "").replace("```", "").strip()
-            start = clean_json.find('[')
-            end = clean_json.rfind(']') + 1
-            
-            if start != -1 and end != -1:
-                json_str = clean_json[start:end]
-                relations = json.loads(json_str)
-                
-                # Post-processing: Ensure 'corroboration' field exists
-                for r in relations:
-                    if 'corroboration' not in r:
-                        r['corroboration'] = 'MEDIUM'  # Default safe value
-                        
-                return relations
-                    
-            return []
-
+            response = self.llm.generate(prompt)
+            result = self._parse_json_dict(response)
+            if isinstance(result, dict):
+                logger.info("LLM resolved %d ambiguous name mappings", len(result))
+                return result
         except Exception as e:
-            print(f"      ⚠️ Extraction Failed: {e}")
-            return []
-        
+            logger.warning("LLM coreference resolution failed: %s", e)
+
+        return {}
+
+    def _normalise_edge_types(self, all_graphs: List[dict]) -> List[dict]:
+        """
+        Collect all unique edge types across all graphs.
+        Send full unique list to LLM for semantic normalisation.
+        rapidfuzz removed — string similarity is blind to semantic synonyms
+        like ACQUIRED_BY / PURCHASED_BY. LLM handles both spelling and semantics.
+        """
+        edge_types = list({
+            edge["type"]
+            for graph in all_graphs
+            for edge in graph.get("edges", [])
+        })
+
+        if len(edge_types) < 2:
+            return all_graphs
+
+        prompt = EDGE_NORMALISE_PROMPT.format(
+            edge_types=json.dumps(edge_types, indent=2)
+        )
+        edge_registry: Dict[str, str] = {}
+        try:
+            response = self.llm.generate(prompt)
+            llm_registry = self._parse_json_dict(response)
+            if isinstance(llm_registry, dict):
+                edge_registry.update(llm_registry)
+                logger.info("LLM normalised %d edge type mappings", len(llm_registry))
+        except Exception as e:
+            logger.warning("LLM edge normalisation failed: %s", e)
+
+        if not edge_registry:
+            return all_graphs
+
+        updated = []
+        for graph in all_graphs:
+            new_edges = [
+                {**e, "type": edge_registry.get(e["type"], e["type"])}
+                for e in graph.get("edges", [])
+            ]
+            updated.append({**graph, "edges": new_edges})
+
+        logger.info("Edge normalisation: %d types remapped", len(edge_registry))
+        return updated
+
+    def apply_entity_registry(self, all_graphs: List[dict]) -> List[dict]:
+        """
+        Full post-extraction deduplication pipeline.
+        Called in ingest.py between Phase B (extraction) and Phase C (Neo4j write).
+
+        Steps:
+        1. Cluster entity names with rapidfuzz
+        2. Auto-merge high-confidence clusters
+        3. LLM resolves ambiguous clusters
+        4. Apply registry — rewrite all node names and edge ids
+        5. Normalise edge types
+        """
+        if not all_graphs:
+            return all_graphs
+
+        total_nodes_before = sum(len(g.get("nodes", [])) for g in all_graphs)
+        print(f"   🔍 Entity registry: analysing {total_nodes_before} nodes across "
+            f"{len(all_graphs)} chunks...")
+
+        # Step 1+2: rapidfuzz clustering
+        auto_registry, ambiguous_clusters = _build_entity_registry(all_graphs)
+
+        # Step 3: LLM for ambiguous cases only
+        llm_registry = self._resolve_ambiguous_with_llm(ambiguous_clusters)
+
+        # Step 4: Merge and apply
+        full_registry = {**auto_registry, **llm_registry}
+
+        if full_registry:
+            print(f"   ✅ Entity registry: {len(full_registry)} name(s) resolved "
+                f"({len(auto_registry)} auto, {len(llm_registry)} via LLM)")
+        else:
+            print(f"   ✅ Entity registry: no duplicates detected")
+
+        all_graphs = _apply_registry_to_graphs(all_graphs, full_registry)
+
+        # Step 5: Edge type normalisation
+        all_graphs = self._normalise_edge_types(all_graphs)
+
+        total_nodes_after = sum(len(g.get("nodes", [])) for g in all_graphs)
+        if total_nodes_before != total_nodes_after:
+            print(f"   📉 Node count: {total_nodes_before} → {total_nodes_after} "
+                f"({total_nodes_before - total_nodes_after} duplicates removed)")
+
+        return all_graphs
+
     @traceable(name="entity_extraction")
-    def extract_query_entities(self, question: str) -> List[str]:
+    @lru_cache(maxsize=512)
+    def extract_query_entities(self, question: str) -> tuple:
         """
-        Uses the LLM to identify the key entities in a user's question for Graph Search.
-        Example: "Who is the CEO of Google?" -> ["CEO", "Google"]
+        LLM-based keyword extraction for graph search at query time.
+        Returns tuple for lru_cache hashability.
+        Call site: list(agent.extract_query_entities(question))
         """
-        system_prompt = """Extract search keywords for a knowledge graph query.
-
-        RULES:
-        1. Extract proper nouns (companies, people, products)
-        2. Extract key financial terms (revenue, EBITDA, ratio)
-        3. Extract time periods (Q1, Q2, 2024, fiscal year)
-        4. Extract action words (acquired, merged, revised)
-        5. Ignore stop words (the, is, what, who)
-
-        Return ONLY a JSON array of 3-8 keywords.
-        Example: ["Apple", "iPhone", "Q1 2024", "revenue", "growth"]
-
-        JSON array:"""
-
         try:
-            response_text = self.llm.generate(question, system_prompt)
-            
-            # Clean up response
-            clean_json = response_text.replace("```json", "").replace("```", "").strip()
-            
-            # Robust JSON extraction
-            start = clean_json.find('[')
-            end = clean_json.rfind(']') + 1
-            
-            if start != -1 and end != -1:
-                return json.loads(clean_json[start:end])
-            
-            return []
+            response_text = self.llm.generate(
+                QUERY_PROMPT.format(question=question)
+            )
+            result = self._parse_json_list(response_text)
+            if result:
+                return tuple(result[:8])
+        except Exception:
+            pass
+        return tuple(w for w in question.split() if len(w) > 4)
 
-        except Exception as e:
-            print(f"Entity Extraction Error: {e}")
-            return []
+
+# ── Singleton ─────────────────────────────────────────────────────────────────
+
+_graph_builder_instance: Optional[GraphBuilder] = None
+
+
+def get_graph_builder() -> GraphBuilder:
+    global _graph_builder_instance
+    if _graph_builder_instance is None:
+        _graph_builder_instance = GraphBuilder()
+    return _graph_builder_instance

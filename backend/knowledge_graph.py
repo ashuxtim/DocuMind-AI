@@ -1,24 +1,54 @@
 import os
+import re
+import logging
 from typing import List, Dict, Optional
-from datetime import datetime
 from neo4j import GraphDatabase
 
-# --- CONFIGURATION ---
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
-NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+logger = logging.getLogger(__name__)
+
+# ── Config ────────────────────────────────────────────────────────────────────
+NEO4J_URI      = os.getenv("NEO4J_URI",  "bolt://neo4j:7687")
+NEO4J_USER     = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+
+if not NEO4J_PASSWORD:
+    raise EnvironmentError(
+        "NEO4J_PASSWORD environment variable is not set. "
+        "Add it to your k8s secret: documind-secrets"
+    )
+
+# ── Cypher templates ──────────────────────────────────────────────────────────
+
+NODE_UPSERT = """
+MERGE (n:{node_type} {{name: $name}})
+ON CREATE SET n.id = $id, n.created_at = timestamp(),
+              n.document_id = $document_id, n.chunk_id = $chunk_id
+ON MATCH SET  n.updated_at = timestamp()
+SET n += $properties
+"""
+
+EDGE_UPSERT = """
+MATCH (a {{name: $source_name}})
+MATCH (b {{name: $target_name}})
+MERGE (a)-[r:{edge_type}]->(b)
+ON CREATE SET r.created_at = timestamp(),
+              r.document_id = $document_id, r.chunk_id = $chunk_id
+"""
+
 
 class KnowledgeBase:
     def __init__(self):
         self.driver = None
         try:
-            self.driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+            self.driver = GraphDatabase.driver(
+                NEO4J_URI,
+                auth=(NEO4J_USER, NEO4J_PASSWORD),
+                max_connection_pool_size=10,
+                connection_acquisition_timeout=30
+            )
             self.driver.verify_connectivity()
             print("✅ Connected to Neo4j Graph Database")
-            
-            # 🚀 NEW: Apply Constraints on Startup
             self._initialize_schema()
-            
         except Exception as e:
             print(f"❌ Neo4j Connection Failed: {e}")
 
@@ -27,224 +57,191 @@ class KnowledgeBase:
             self.driver.close()
 
     def _initialize_schema(self):
-        """
-        Creates constraints to ensure data integrity and speed up lookups.
-        Production App Requirement: Never allow duplicate nodes.
-        """
         constraints = [
-            "CREATE CONSTRAINT entity_name IF NOT EXISTS FOR (e:Entity) REQUIRE e.name IS UNIQUE",
-            "CREATE CONSTRAINT statute_name IF NOT EXISTS FOR (s:Statute) REQUIRE s.name IS UNIQUE",
             "CREATE CONSTRAINT person_name IF NOT EXISTS FOR (p:Person) REQUIRE p.name IS UNIQUE",
             "CREATE CONSTRAINT org_name IF NOT EXISTS FOR (o:Organization) REQUIRE o.name IS UNIQUE",
-            "CREATE INDEX relation_source IF NOT EXISTS FOR ()-[r:RELATION]-() ON (r.source)"
+            "CREATE CONSTRAINT location_name IF NOT EXISTS FOR (l:Location) REQUIRE l.name IS UNIQUE",
+            "CREATE CONSTRAINT concept_name IF NOT EXISTS FOR (c:Concept) REQUIRE c.name IS UNIQUE",
         ]
-        
+        fulltext_indexes = [
+            """CREATE FULLTEXT INDEX entity_fulltext IF NOT EXISTS
+               FOR (n:Person|Organization|Location|Technology|Product|Event|Concept|Document|Law|Date|Amount)
+               ON EACH [n.name]""",
+        ]
         with self.driver.session() as session:
-            for c in constraints:
+            for stmt in constraints + fulltext_indexes:
                 try:
-                    session.run(c)
+                    session.run(stmt)
                 except Exception as e:
-                    print(f"⚠️ Schema Warning: {e}")
+                    err = str(e).lower()
+                    if "already exists" in err or "equivalent" in err:
+                        pass
+                    else:
+                        raise RuntimeError(f"Schema init failed: {e}") from e
 
-    def _classify_entity(self, name: str) -> str:
+    def ingest_graph(self, graphs: List[Dict], document_id: str) -> None:
         """
-        Simple heuristic to classify nodes. 
-        In a full enterprise app, an LLM would do this, but this regex is fast and effective.
+        Bulk Neo4j write for all chunk graphs from one document.
+        graphs: list of {nodes, edges} dicts returned by extract_relationships().
+        Nodes written before edges. One session for the entire document.
+        chunk_id is read per-node from its own properties — no hoisting.
         """
-        lower = name.lower()
-        if any(x in lower for x in ['section', 'article', 'act', 'code', 'regulation']):
-            return "Statute"
-        if any(x in lower for x in ['inc', 'ltd', 'corp', 'company', 'organization']):
-            return "Organization"
-        if any(x in lower for x in ['mr.', 'mrs.', 'ms.', 'dr.', 'judge']):
-            return "Person"
-        return "Entity" # Fallback
-
-    def add_relations(self, relations: List[Dict], source_file: str, page_number: int = 1):
-        """
-        Inserts nodes with TYPES and NEW EDGE WEIGHTS (Corroboration + Time).
-        """
-        if not self.driver:
-            return
-
-        # FIX: Stable entity typing and corroboration accumulation
-        simple_query = """
-        UNWIND $batch AS row
-        
-        // STABLE TYPING: Only set type if the node is brand new
-        MERGE (s:Entity {name: row.subject})
-        ON CREATE SET s.type = row.subject_type
-        
-        MERGE (o:Entity {name: row.object})
-        ON CREATE SET o.type = row.object_type
-        
-        // EDGE CREATION: Scoped to the source document
-        MERGE (s)-[r:RELATION {type: row.predicate, source: row.source}]->(o)
-        ON CREATE SET 
-            r.page = row.page,
-            r.confidence = 0.95,
-            r.created_at = datetime(),
-            r.corroboration_strength = row.corroboration,
-            r.temporal_version = row.period,
-            r.mentions = 1
-        // CORROBORATION: Accumulate mentions if found again in the same doc
-        ON MATCH SET
-            r.mentions = r.mentions + 1
-        """
-
-        batch_data = []
-        for r in relations:
-            subj = r.get("subject")
-            obj = r.get("object")
-            pred = r.get("predicate")
-            
-            if subj and obj and pred:
-                # We classify entities just like before
-                batch_data.append({
-                    "subject": subj,
-                    "subject_type": self._classify_entity(subj),
-                    "object": obj,
-                    "object_type": self._classify_entity(obj),
-                    "predicate": pred.upper().replace(" ", "_"), 
-                    "source": source_file,
-                    "page": page_number,
-                    "confidence": 0.95,
-                    # NEW: Default to 'MEDIUM' if LLM didn't find explicit link
-                    "corroboration": r.get("corroboration", "MEDIUM"),
-                    # NEW: Default to 'UNKNOWN' if no date found
-                    "period": r.get("period", "UNKNOWN")
-                })
-
-        if not batch_data:
+        if not self.driver or not graphs:
             return
 
         with self.driver.session() as session:
-            try:
-                session.run(simple_query, batch=batch_data)
-                print(f"   -> Graph+ stored {len(batch_data)} relations (Page {page_number})")
-            except Exception as e:
-                print(f"   ⚠️ Neo4j Write Error: {e}")
-    def get_visualization_data(self, limit: int = 1000):
-        if not self.driver: 
-            return {"nodes": [], "links": [], "total": 0}
-        
-        # Cap limit server-side
-        limit = min(max(limit, 1), 5000)
-        
-        query = """
-        MATCH (s)-[r]->(o)
-        RETURN s.name AS source, 
-            COALESCE(s.type, 'Entity') as source_type, 
-            r.type AS relation, 
-            o.name AS target, 
-            COALESCE(o.type, 'Entity') as target_type
-        LIMIT $limit
-        """
-        
-        nodes = {}
-        links = []
-        
-        with self.driver.session() as session:
-            # Get total count
-            total = session.run("MATCH ()-[r]->() RETURN count(r) AS c").single()["c"]
-            
-            for rec in session.run(query, limit=limit):
-                nodes[rec["source"]] = {"id": rec["source"], "group": rec["source_type"]}
-                nodes[rec["target"]] = {"id": rec["target"], "group": rec["target_type"]}
-                links.append({"source": rec["source"], "target": rec["target"], "label": rec["relation"]})
-        
-        return {"nodes": list(nodes.values()), "links": links, "total": total}
+            for graph in graphs:
+                # Nodes first — chunk_id comes from each node's own properties
+                for node in graph.get("nodes", []):
+                    try:
+                        session.run(
+                            NODE_UPSERT.format(node_type=node["type"]),
+                            name=node["name"],
+                            id=node["id"],
+                            document_id=document_id,
+                            chunk_id=node.get("properties", {}).get("chunk_id", ""),
+                            properties=node.get("properties", {})
+                        )
+                    except Exception as e:
+                        logger.warning("Node upsert failed %s: %s", node.get("name"), e)
 
+                # Edges after all nodes in this chunk exist
+                id_to_name = {n["id"]: n["name"] for n in graph.get("nodes", [])}
+                for edge in graph.get("edges", []):
+                    source_name = id_to_name.get(edge["source_id"])
+                    target_name = id_to_name.get(edge["target_id"])
+                    if not source_name or not target_name:
+                        continue
+                    try:
+                        session.run(
+                            EDGE_UPSERT.format(edge_type=edge["type"]),
+                            source_name=source_name,
+                            target_name=target_name,
+                            document_id=document_id,
+                            chunk_id=edge.get("properties", {}).get("chunk_id", "")
+                        )
+                    except Exception as e:
+                        logger.warning("Edge upsert failed %s->%s: %s",
+                                       source_name, target_name, e)
 
-
-    def get_graph_statistics(self):
-        """Fetches statistics using Cypher queries."""
-        if not self.driver: return "Graph DB Disconnected."
-        try:
-            with self.driver.session() as session:
-                total = session.run("MATCH ()-[r]->() RETURN count(DISTINCT r.source) as c").single()["c"]
-                top = session.run("MATCH (n:Entity) RETURN n.name as name, size((n)--()) as d ORDER BY d DESC LIMIT 5")
-                stats = [f"TOTAL DOCS: {total}", "TOP ENTITIES:"] + [f"- {r['name']}: {r['d']}" for r in top]
-                return "\n".join(stats)
-        except: return "Stats unavailable"
-
-    # [FILE: knowledge_graph.py]
-    # Find the 'query_subgraph' method and REPLACE the entire method with this version.
-    # CHANGES: Cypher query now looks for 2nd-hop adversarial edges.
-    # PRESERVES: Output format (returns a string representation of the subgraph).
+        total_nodes = sum(len(g.get("nodes", [])) for g in graphs)
+        total_edges = sum(len(g.get("edges", [])) for g in graphs)
+        print(f"   -> Graph stored {total_nodes} nodes, {total_edges} edges for {document_id}")
 
     def query_subgraph(self, keywords: List[str]) -> str:
-        """
-        Query with PRIORITY for HIGH corroboration edges + ADVERSARIAL TRAVERSAL.
-        """
-        if not self.driver or not keywords: return ""
-        
-        # New Query: Bidirectional adversarial hop + Explicit Aliases
+        if not self.driver or not keywords:
+            return ""
+
+        keyword_query = " OR ".join(f'"{kw}"' for kw in keywords if kw.strip())
+
         query = """
-        UNWIND $keywords AS keyword
-        MATCH (n:Entity) WHERE toLower(n.name) CONTAINS toLower(keyword)
-        
-        // 1. Standard 1-Hop Traversal (EXCLUDING ADVERSARIAL EDGES)
-        MATCH (n)-[r1:RELATION]-(m)
-        WHERE NOT r1.type IN ['CONTRADICTS', 'REVISES', 'SUPERSEDES', 'NEGATES']
-        
-        // 2. Bidirectional Adversarial Look-Ahead
-        OPTIONAL MATCH (m)-[r2:RELATION]-(leaf)
-        WHERE r2.type IN ['CONTRADICTS', 'REVISES', 'SUPERSEDES', 'NEGATES']
-        
-        // EXPLICIT ALIASES
-        RETURN n.name AS n_name, 
-               r1.type AS rel, 
-               m.name AS m_name,
-               r1.corroboration_strength AS strength,
-               r1.temporal_version AS period,
-               r2.type AS rel2,
-               leaf.name AS leaf_node
-        ORDER BY 
-            CASE r1.corroboration_strength 
-                WHEN 'HIGH' THEN 1 
-                WHEN 'MEDIUM' THEN 2 
-                ELSE 3 
-            END,
-            r1.created_at DESC
+        CALL db.index.fulltext.queryNodes('entity_fulltext', $keyword_query)
+        YIELD node AS n, score
+        WHERE score > 0.3
+
+        MATCH (n)-[r1]-(m)
+
+        OPTIONAL MATCH (m)-[r2]-(leaf)
+        WHERE type(r2) IN ['RELATED_TO', 'MENTIONS']
+
+        WITH DISTINCT
+            n.name AS n_name,
+            type(r1) AS rel,
+            m.name AS m_name,
+            type(r2) AS rel2,
+            leaf.name AS leaf_node
+        RETURN n_name, rel, m_name, rel2, leaf_node
         LIMIT 50
         """
         try:
             with self.driver.session() as session:
                 results = []
-                for r in session.run(query, keywords=keywords):
-                    # SECURE KVP ACCESS
-                    base = f"({r['n_name']}) -[{r['rel']} | {r['strength']} | {r['period']}]-> ({r['m_name']})"
-                    
+                for r in session.run(query, keyword_query=keyword_query):
+                    base = f"({r['n_name']}) -[{r['rel']}]-> ({r['m_name']})"
                     if r['rel2'] and r['leaf_node']:
-                        full_path = (f"{base}\n"
-                                    f"  └─> [ALSO_SEE: {r['rel2']}] --> "
-                                    f"(ALTERNATIVE_VALUE: {r['leaf_node']})")
-                        full_path += "\n      [Note: Multiple values present - check source for context]"
-                    else:
-                        full_path = base
-                    
-                    results.append(full_path)
-                        
+                        base += f"\n  └─> [{r['rel2']}] --> ({r['leaf_node']})"
+                    results.append(base)
             return "\n".join(results) if results else ""
         except Exception as e:
             print(f"Graph query error: {e}")
             return ""
-        
-    def delete_document(self, filename: str):
-        if not self.driver: 
+
+    def get_visualization_data(self, limit: int = 1000):
+        if not self.driver:
+            return {"nodes": [], "links": [], "total": 0}
+
+        limit = min(max(limit, 1), 5000)
+
+        query = """
+        MATCH (s)-[r]->(o)
+        WITH s, r, o, COUNT { MATCH ()-[]->() } AS total
+        RETURN
+            s.name AS source,
+            labels(s)[0] AS source_type,
+            type(r) AS relation,
+            o.name AS target,
+            labels(o)[0] AS target_type,
+            total
+        LIMIT $limit
+        """
+
+        nodes = {}
+        links = []
+        total = 0
+
+        with self.driver.session() as session:
+            for rec in session.run(query, limit=limit):
+                total = rec["total"]
+                nodes[rec["source"]] = {"id": rec["source"], "group": rec["source_type"]}
+                nodes[rec["target"]] = {"id": rec["target"], "group": rec["target_type"]}
+                links.append({
+                    "source": rec["source"],
+                    "target": rec["target"],
+                    "label":  rec["relation"]
+                })
+
+        return {"nodes": list(nodes.values()), "links": links, "total": total}
+
+    def get_graph_statistics(self):
+        if not self.driver:
+            return "Graph DB Disconnected."
+        try:
+            with self.driver.session() as session:
+                # Bug 2 fix — count via nodes, more reliable than edge provenance
+                total = session.run(
+                    "MATCH (n) WHERE n.document_id IS NOT NULL "
+                    "RETURN count(DISTINCT n.document_id) as c"
+                ).single()["c"]
+                top = session.run(
+                    "MATCH (n) RETURN n.name as name, "
+                    "size((n)--()) as d ORDER BY d DESC LIMIT 5"
+                )
+                stats = [f"TOTAL DOCS: {total}", "TOP ENTITIES:"] + \
+                        [f"- {r['name']}: {r['d']}" for r in top]
+                return "\n".join(stats)
+        except Exception as e:
+            print(f"⚠️ Graph stats error: {e}")
+            return "Stats unavailable"
+
+    def delete_document(self, filename: str) -> None:
+        if not self.driver:
             return
-            
-        # Define the atomic transaction
+
         def _delete_tx(tx, f):
-            # 1. Delete all relationships originating from this file
-            tx.run("MATCH ()-[r:RELATION]-() WHERE r.source = $f DELETE r", f=f)
-            # 2. Clean up any nodes that are now completely orphaned
-            tx.run("MATCH (n:Entity) WHERE NOT (n)--() DELETE n")
-            
+            # Delete all edges belonging to this document
+            tx.run("MATCH ()-[r]->() WHERE r.document_id = $f DELETE r", f=f)
+
+            # Bug 3 fix — only delete nodes exclusively owned by this document
+            # that are now disconnected. Shared nodes survive untouched.
+            tx.run("""
+                MATCH (n)
+                WHERE n.document_id = $f
+                AND NOT (n)--()
+                DELETE n
+            """, f=f)
+
         with self.driver.session() as session:
             try:
-                # execute_write guarantees both succeed, or both roll back
                 session.execute_write(_delete_tx, filename)
                 print(f"✅ Successfully purged graph data for: {filename}")
             except Exception as e:
