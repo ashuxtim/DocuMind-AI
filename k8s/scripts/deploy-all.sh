@@ -10,11 +10,6 @@
 # 5. StatefulSets (databases start first — pods need time)
 # 6. Deployments (app connects to databases)
 # 7. Ingress (routing layer — everything must be running)
-#
-# WHY ORDER MATTERS:
-# StatefulSets reference Headless Services in .spec.serviceName.
-# Pods reference Secrets and ConfigMaps in env/volumeMounts.
-# If these don't exist at apply time, pods fail to start.
 # ────────────────────────────────────────────────────────────────
 
 set -e  # Exit on any error
@@ -22,7 +17,7 @@ set -e  # Exit on any error
 YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 echo ""
 echo "═══════════════════════════════════════════════"
@@ -33,7 +28,6 @@ echo ""
 # ── PRE-FLIGHT CHECKS ──
 echo "── Pre-flight Checks ──"
 
-# Check kubectl is connected
 if ! kubectl cluster-info &>/dev/null; then
     echo -e "${RED}ERROR: kubectl cannot connect to cluster.${NC}"
     echo "  Run: minikube start"
@@ -56,8 +50,11 @@ if [ $MISSING_SECRETS -eq 1 ]; then
     echo ""
     echo -e "${YELLOW}Create missing secrets before deploying:${NC}"
     echo "  kubectl create secret generic documind-secrets \\"
-    echo "    --from-literal=GEMINI_API_KEY=your-key \\"
-    echo "    --from-literal=NEO4J_PASSWORD=password"
+    echo "    --from-literal=NVIDIA_API_KEY=nvapi-xxx \\"
+    echo "    --from-literal=LLAMA_CLOUD_API_KEY=llx-xxx \\"
+    echo "    --from-literal=GROQ_API_KEY=gsk_xxx \\"
+    echo "    --from-literal=NEO4J_PASSWORD=password \\"
+    echo "    --from-literal=LANGCHAIN_API_KEY=lsv2_xxx"
     echo ""
     echo "  kubectl create secret generic minio-credentials \\"
     echo "    --from-literal=root_user=admin \\"
@@ -67,6 +64,10 @@ if [ $MISSING_SECRETS -eq 1 ]; then
 fi
 
 # Check Docker image is available
+# NOTE: image must be rebuilt after the API stack upgrade.
+# If still on v1.1, code changes will not be active in the cluster.
+# Build: docker build -t documind-fastapi:v2.0 .
+# Load:  minikube image load documind-fastapi:v2.0
 if minikube image ls 2>/dev/null | grep -q "documind"; then
     echo -e "  ${GREEN}✅ DocuMind image found in Minikube${NC}"
 else
@@ -81,7 +82,7 @@ kubectl apply -f k8s/base/documind-configmap.yaml
 echo -e "  ${GREEN}✅ ConfigMap applied${NC}"
 echo ""
 
-# ── STEP 2: Services (all of them — Headless + Regular) ──
+# ── STEP 2: Services ──
 echo "── Step 2: Services ──"
 kubectl apply -f k8s/base/redis-service.yaml
 kubectl apply -f k8s/base/qdrant-headless-service.yaml
@@ -91,19 +92,19 @@ kubectl apply -f k8s/base/neo4j-service.yaml
 kubectl apply -f k8s/base/minio-headless-service.yaml
 kubectl apply -f k8s/base/minio-service.yaml
 kubectl apply -f k8s/base/fastapi-service.yaml
-kubectl apply -f k8s/base/ollama-headless-service.yaml
-kubectl apply -f k8s/base/ollama-service.yaml
+# Ollama services removed — LLM inference is now via NVIDIA NIM API
 echo -e "  ${GREEN}✅ All services applied${NC}"
 echo ""
 
-# ── STEP 3: StatefulSets (databases — start first) ──
+# ── STEP 3: StatefulSets (databases) ──
 echo "── Step 3: StatefulSets (databases) ──"
-kubectl apply -f k8s/base/redis-pvc.yaml 
+kubectl apply -f k8s/base/redis-pvc.yaml
+kubectl apply -f k8s/base/model-cache-pvc.yaml
 kubectl apply -f k8s/base/redis-deployment.yaml
 kubectl apply -f k8s/base/qdrant-statefulset.yaml
 kubectl apply -f k8s/base/neo4j-statefulset.yaml
 kubectl apply -f k8s/base/minio-statefulset.yaml
-kubectl apply -f k8s/base/ollama-statefulset.yaml
+# Ollama statefulset removed — no local model inference
 
 echo "  Waiting for databases to be ready..."
 kubectl wait --for=condition=ready pod -l app=redis --timeout=120s 2>/dev/null && \
@@ -117,13 +118,9 @@ kubectl wait --for=condition=ready pod -l app=neo4j --timeout=180s 2>/dev/null &
 
 kubectl wait --for=condition=ready pod -l app=minio --timeout=120s 2>/dev/null && \
     echo -e "  ${GREEN}✅ MinIO ready${NC}" || echo -e "  ${RED}❌ MinIO timeout${NC}"
-
-echo "  ⏳ Waiting for Ollama (model loading — this takes 2-3 minutes on first run)..."
-kubectl wait --for=condition=ready pod -l app=ollama --timeout=300s 2>/dev/null && \
-    echo -e "  ${GREEN}✅ Ollama ready${NC}" || echo -e "  ${YELLOW}⚠️  Ollama still loading — check with: kubectl logs ollama-0${NC}"
 echo ""
 
-# ── STEP 4: Deployments (app layer — needs databases) ──
+# ── STEP 4: Deployments (app layer) ──
 echo "── Step 4: Deployments (application) ──"
 kubectl apply -f k8s/base/fastapi-deployment.yaml
 kubectl apply -f k8s/base/worker-deployment.yaml
@@ -154,4 +151,8 @@ echo "   Neo4j:  http://documind.local/neo4j/"
 echo "   MinIO:  http://documind.local/minio/"
 echo ""
 echo " Quick check: curl http://documind.local/api/health"
+echo ""
+echo -e " ${YELLOW}NOTE: Verify NVIDIA NIM connectivity after deploy:${NC}"
+echo "   kubectl logs deployment/fastapi | grep -E 'NVIDIA|embed|rerank|ERROR'"
+echo "   kubectl logs deployment/worker  | grep -E 'NVIDIA|embed|rerank|ERROR'"
 echo ""

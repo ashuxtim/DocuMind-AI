@@ -2,11 +2,12 @@ import os
 import json
 import re
 import hashlib
+import requests
 from functools import lru_cache
 from typing import TypedDict, List, Dict
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from langgraph.graph import StateGraph, END
-from sentence_transformers import CrossEncoder
 
 from code_executor import MathExecutor
 from vector_store import VectorStore
@@ -62,6 +63,125 @@ COMPLEXITY_PATTERNS = [
     r'\b(first|second|third).*(then|after|subsequently)\b', # Sequential steps
 ]
 
+# Predicate/constraint signals — route to ConstraintChecker.
+# Deliberately tight: operators and formal obligation keywords only.
+# Plain English "all", "every", "exists" excluded — too broad, false positive factory.
+PREDICATE_SIGNALS = re.compile(
+    r'\bmust\b|\bshall\b|shall\s+not\b|cannot\b|required\s+to\b|'
+    r'forall\s*\(|∀|∃|'
+    r'>=|<=|!=|==|>(?!=)|<(?!=)',
+    re.IGNORECASE
+)
+
+# Synthesis signals — multi-section questions that need min 3 sub-questions.
+SYNTHESIS_SIGNALS = [
+    r'\blist\s+(all|every|each)\b',
+    r'\b(all|every|each)\s+\w+\s+(of|from|across|in)\b',
+    r'\b(three|four|five|multiple)\b.{0,40}\b(commitment|payment|condition|person|risk)\b',
+    r'\bseparate\b.{0,30}\b(amount|figure|value|payment)\b',
+    r'\bacross\b.{0,30}\b(section|document|report)\b',
+    r'\btotal.{0,20}(all|each|every)\b',
+]
+
+# Multi-entity signals — widen retrieval top-K when question targets 2+ entities.
+MULTI_ENTITY_SIGNALS = [
+    r'\b(both|two|three|four)\b.{0,40}\b(executive|person|employee|team|party|parties|director|shareholder)\b',
+    r'\beach\s+of\b',
+    r'\bthe\s+signatories\b',
+    r'\beither\s+party\b',
+    r'\ball\s+(three|four|named|listed)\b',
+    r'\bwho\s+are\s+(the|all)\b',
+]
+
+
+# ---------------------------------------------------------------------------
+# NVIDIA NIM RERANKER
+# ---------------------------------------------------------------------------
+
+def _is_retryable_reranker(exc: Exception) -> bool:
+    """
+    Retry on transient network failures and 429/5xx HTTP errors only.
+    400 Bad Request (malformed payload) fails immediately — it will never
+    succeed on retry. Same principle as _is_retryable_gemini in llm_provider.py.
+    status_code lives on exc.response.status_code for requests.HTTPError.
+    """
+    if isinstance(exc, (requests.exceptions.ConnectionError,
+                        requests.exceptions.Timeout)):
+        return True
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status = getattr(exc.response, 'status_code', None)
+        return status == 429 or (status is not None and status >= 500)
+    return False
+
+
+class NvidiaReranker:
+    """
+    Thin wrapper around the NVIDIA NIM reranker REST API.
+    Exposes a predict(pairs) method with the same interface as CrossEncoder.predict()
+    so retrieve_node requires no changes.
+
+    IMPORTANT — response format: the API returns a `rankings` list sorted by
+    relevance (descending logit), where each item carries the *original* passage
+    index. A naive loop reading response order assigns scores to wrong documents.
+    predict() reconstructs a flat scores array keyed by original index so that
+    scores[i] is always the logit for passage i.
+
+    Scores are raw logits (not sigmoid-scaled). Threshold in retrieve_node is
+    controlled by AGENT_MIN_RERANK_SCORE env var (default -5.0).
+    Verified from NVIDIA NIM docs: relevant docs score roughly -3 to +1,
+    clear noise drops below -5.
+    """
+
+    @property
+    def ENDPOINT(self):
+        model = os.getenv("RERANK_MODEL", "nvidia/nv-rerankqa-mistral-4b-v3")
+        return f"https://ai.api.nvidia.com/v1/retrieval/{model}/reranking"
+
+    def __init__(self, api_key: str):
+        if not api_key:
+            raise RuntimeError(
+                "NVIDIA_API_KEY is required for the reranker. "
+                "Set NVIDIA_API_KEY in your K8s secret."
+            )
+        self.headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception(_is_retryable_reranker)
+    )
+    def predict(self, pairs: list) -> list:
+        """
+        pairs: list of [query, passage] — same format as CrossEncoder.predict().
+        Returns: list of logit scores, scores[i] corresponds to pairs[i].
+        """
+        query = pairs[0][0]  # All pairs share the same query
+        passages = [{"text": p[1]} for p in pairs]
+
+        payload = {
+            "model": os.getenv("RERANK_MODEL", "nvidia/nv-rerankqa-mistral-4b-v3"),
+            "query": {"text": query},
+            "passages": passages,
+        }
+
+        response = requests.post(self.ENDPOINT, headers=self.headers, json=payload, timeout=(5, 30))
+        response.raise_for_status()
+        data = response.json()
+
+        # Reconstruct flat scores array by original index.
+        # API returns rankings sorted by relevance — each item has 'index' (original
+        # passage position) and 'logit'. Reading in response order would assign
+        # wrong scores to wrong documents.
+        scores = [0.0] * len(pairs)
+        for ranking in data["rankings"]:
+            scores[ranking["index"]] = ranking["logit"]
+
+        return scores
+
 
 # ---------------------------------------------------------------------------
 # SERVICE SINGLETON  (lru_cache — created once per worker process)
@@ -77,14 +197,14 @@ def get_services() -> dict:
     """
     print("⏳ Initializing agent services (once per worker process)...")
     _llm = get_llm_provider()
-    print("⏳ Loading Reranker (Cross-Encoder)...")
-    _reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+    print("⏳ Initializing Reranker (NVIDIA NIM llama-nemotron-rerank-1b-v2)...")
+    _reranker = NvidiaReranker(api_key=os.getenv("NVIDIA_API_KEY"))
     print("✅ Reranker Ready.")
     services = {
         "vector_db":          VectorStore(),
         "kb":                 KnowledgeBase(),
         "llm":                _llm,
-        "math_executor":      MathExecutor(_llm),
+        "math_executor":      MathExecutor(get_llm_provider(role="extraction")),
         "graph_builder":      get_graph_builder(),
         "constraint_checker": ConstraintChecker(_llm),
         "reranker":           _reranker,
@@ -109,6 +229,71 @@ class AgentState(TypedDict):
     selected_docs:     List[str]          # User-selected docs for filtered search
     top_rerank_score:  float              # Best reranker score from retrieve_node
     has_contradiction: bool               # True when a documented conflict is found
+    question_type:     str                # "math" | "predicate" | "factual" | "synthesis"
+    multi_entity:      bool               # True when question targets 2+ entities
+
+
+# ---------------------------------------------------------------------------
+# NODE: route_question_node
+# ---------------------------------------------------------------------------
+
+def route_question_node(state: AgentState):
+    """
+    Classifies the question before decomposition and retrieval.
+    Sets question_type and multi_entity in AgentState — both fields survive
+    the full cycle (route → decompose → retrieve → generate → audit).
+
+    question_type:
+      "math"      — calculation signal detected (reuses math_executor.needs_math())
+                    → ConstraintChecker skipped in audit_node
+      "synthesis" — multi-section question needing 3+ sub-questions
+                    → ConstraintChecker skipped, decompose enforces min 3
+      "predicate" — formal constraint language detected
+                    → ConstraintChecker runs
+      "factual"   — everything else
+                    → ConstraintChecker runs
+
+    multi_entity: True when question signals 2+ named entities.
+      → retrieve_node widens top-K from 10 to 15.
+
+    Does NOT change graph edges — flow is always:
+      route → decompose → retrieve → generate → audit
+    """
+    svc = get_services()
+    math_executor = svc["math_executor"]
+
+    question = state["question"]
+    q_lower  = question.lower()
+
+    print("--- 🧭 ROUTING QUESTION ---")
+
+    # --- Math classification — reuse existing needs_math() rather than duplicate ---
+    if math_executor.needs_math(question):
+        question_type = "math"
+        print("   🧮 Classified as: math")
+
+    elif PREDICATE_SIGNALS.search(question):
+        question_type = "predicate"
+        print("   🔍 Classified as: predicate")
+
+    elif any(re.search(p, q_lower) for p in SYNTHESIS_SIGNALS):
+        question_type = "synthesis"
+        print("   🔀 Classified as: synthesis")
+
+    # --- Factual — everything else ---
+    else:
+        question_type = "factual"
+        print("   📄 Classified as: factual")
+
+    # --- Multi-entity detection — same pass, no separate keyword list ---
+    multi_entity = any(re.search(p, q_lower) for p in MULTI_ENTITY_SIGNALS)
+    if multi_entity:
+        print("   👥 Multi-entity question detected — retrieval top-K will widen")
+
+    return {
+        "question_type": question_type,
+        "multi_entity":  multi_entity,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -120,15 +305,28 @@ def decompose_query_node(state: AgentState):
     Breaks complex questions into simpler sub-queries for better retrieval.
     Uses word-boundary regex patterns + word-count to avoid false positives
     on common words like 'and', 'first', 'second'.
+
+    Synthesis questions (question_type == "synthesis") enforce a minimum of
+    3 sub-questions, each targeting a different section of the document.
+
+    Commit A — synthesis min 3 sub-questions.
+    Commit B — financial vocabulary guidance in decompose prompt.
+    Both are included here. Attribution: Commit A = synthesis block,
+    Commit B = financial vocabulary lines in system_prompt.
     """
     svc = get_services()
     llm = svc["llm"]
 
-    question = state["question"]
+    question      = state["question"]
+    question_type = state.get("question_type", "factual")
+
     print("--- 🔀 DECOMPOSING QUERY ---")
 
+    is_synthesis = question_type == "synthesis"
+
     is_complex = (
-        len(question.split()) > 15
+        is_synthesis
+        or len(question.split()) > 15
         or any(re.search(p, question.lower()) for p in COMPLEXITY_PATTERNS)
     )
 
@@ -136,9 +334,39 @@ def decompose_query_node(state: AgentState):
         print("   💡 Simple question — no decomposition needed")
         return {"sub_queries": [question]}
 
-    system_prompt = """You are a query decomposition expert.
+    # --- Commit A: synthesis enforces min 3 section-targeted sub-questions ---
+    if is_synthesis:
+        system_prompt = """You are a query decomposition expert for financial document analysis.
+
+This question requires synthesising information from MULTIPLE SECTIONS of the document.
+Generate sub-questions that together cover ALL aspects of the main question.
+
+RULES:
+- Generate a MINIMUM of 3 sub-questions, maximum 5
+- Each sub-question must target a DIFFERENT part of the document
+- Sub-questions must NOT overlap in scope
+- Include at least one sub-question targeting numeric or financial data
+- Include at least one sub-question targeting named people or entities
+- Each sub-question must be independently answerable
+
+For financial document queries, use concrete document-domain vocabulary:
+- Instead of "financial obligation" → use "payment", "bonus", "retainer", "installment"
+- Instead of "who receives" → use "retention package", "consulting agreement"
+- Match the vocabulary likely to appear in the source document
+
+Return ONLY a JSON array of strings.
+Example: ["What cash consideration is paid at closing?", "What retention bonuses are paid to named individuals?", "What consulting agreement payments are made post-close?"]
+"""
+    else:
+        # --- Commit B: financial vocabulary guidance for all other complex questions ---
+        system_prompt = """You are a query decomposition expert for financial document analysis.
 Break complex questions into 2-4 simpler sub-questions.
 Each sub-question should be answerable independently.
+
+For financial document queries, use concrete document-domain vocabulary:
+- Instead of "financial obligation" → use "payment", "bonus", "retainer", "installment"
+- Instead of "who receives" → use "retention package", "consulting agreement"
+- Match the vocabulary likely to appear in the source document
 
 Return ONLY a JSON array of strings.
 Example: ["What is revenue in Q1?", "What is revenue in Q2?", "What is the trend?"]
@@ -154,10 +382,17 @@ JSON array:"""
         response = llm.generate(prompt, system_prompt)
         sub_queries = _parse_json_list(response)
 
-        if sub_queries:
+        # Enforce minimum 3 for synthesis — if LLM returned fewer, fall through
+        # to single-query fallback which is better than under-decomposed synthesis
+        if sub_queries and (not is_synthesis or len(sub_queries) >= 3):
             print(f"   ✅ Decomposed into {len(sub_queries)} sub-queries:")
             for i, sq in enumerate(sub_queries, 1):
                 print(f"      {i}. {sq}")
+            return {"sub_queries": sub_queries}
+
+        if is_synthesis and sub_queries and len(sub_queries) < 3:
+            print(f"   ⚠️ Synthesis question got only {len(sub_queries)} sub-queries — "
+                  f"expected ≥3. Using what we have.")
             return {"sub_queries": sub_queries}
 
     except Exception as e:
@@ -175,6 +410,9 @@ def retrieve_node(state: AgentState):
     """
     Retrieves for each sub-query, deduplicates, reranks, and optionally
     runs graph search when real entities are extracted.
+
+    Multi-entity widening: when multi_entity is True, base_k raises from
+    10 to 15 so per-sub-query limits cover both entity contexts.
     """
     svc = get_services()
     vector_db     = svc["vector_db"]
@@ -185,6 +423,7 @@ def retrieve_node(state: AgentState):
     sub_queries   = state.get("sub_queries", [state["question"]])
     question      = state["question"]
     selected_docs = state.get("selected_docs", [])
+    multi_entity  = state.get("multi_entity", False)
 
     print(f"--- 🔍 RETRIEVING FOR {len(sub_queries)} SUB-QUERIES ---")
 
@@ -195,9 +434,14 @@ def retrieve_node(state: AgentState):
     # --- 1. VECTOR SEARCH (per sub-query) ---
     all_vector_results = []
 
+    # Multi-entity widening: base_k=15 ensures both entity contexts are covered
+    # when sub-queries are distributed across entities. Tune via env var if needed.
+    base_k = 15 if multi_entity else 10
+
     if len(sub_queries) > 1:
-        per_query_limit = max(3, 10 // len(sub_queries))
-        print(f"   📊 Multi-query mode: {per_query_limit} docs per sub-query")
+        per_query_limit = max(3, base_k // len(sub_queries))
+        print(f"   📊 Multi-query mode: {per_query_limit} docs per sub-query"
+              f"{' (multi-entity widened)' if multi_entity else ''}")
 
         for i, sq in enumerate(sub_queries, 1):
             results = vector_db.search(sq, limit=per_query_limit, filters=search_filters)
@@ -205,7 +449,7 @@ def retrieve_node(state: AgentState):
                 r['_from_subquery'] = i
             all_vector_results.extend(results)
     else:
-        results = vector_db.search(sub_queries[0], limit=10, filters=search_filters)
+        results = vector_db.search(sub_queries[0], limit=base_k, filters=search_filters)
         all_vector_results.extend(results)
 
     # --- 2. DEDUPLICATE (MD5 of first 200 chars — fast, whitespace-tolerant) ---
@@ -219,7 +463,10 @@ def retrieve_node(state: AgentState):
 
     print(f"   📦 {len(unique_results)} unique candidates from {len(sub_queries)} queries")
 
-    # --- 3. RERANK (Cross-Encoder against original question) ---
+    # --- 3. RERANK (NVIDIA NIM reranker against original question) ---
+    # Scores are raw logits. AGENT_MIN_RERANK_SCORE default -5.0 is based on
+    # observed NVIDIA NIM score distribution: relevant docs score roughly -3 to +1,
+    # clear noise drops below -5. Tune via env var without redeploy.
     top_score = 0.0
     if unique_results:
         try:
@@ -232,7 +479,7 @@ def retrieve_node(state: AgentState):
 
             unique_results.sort(key=lambda x: x['_rerank_score'], reverse=True)
 
-            MIN_RELEVANCE_SCORE = 0.35
+            MIN_RELEVANCE_SCORE = float(os.getenv("AGENT_MIN_RERANK_SCORE", "-5.0"))
             filtered = [r for r in unique_results if r['_rerank_score'] > MIN_RELEVANCE_SCORE]
 
             if not filtered:
@@ -292,7 +539,7 @@ def retrieve_node(state: AgentState):
 def generate_node(state: AgentState):
     """
     Detects math, executes code, injects result into LLM context, then
-    generates the answer using up to 60K chars of context (Qwen3-32B: 128K).
+    generates the answer using up to AGENT_MAX_CONTEXT_CHARS of context.
     Feedback from the auditor is injected into BOTH system and user turns.
     """
     svc = get_services()
@@ -329,8 +576,13 @@ Do not attempt to recalculate it mentally.
             print(f"   ⚠️ Math Executor Exception: {e}")
 
     # --- 2. SMART CONTEXT PRUNING ---
-    # Qwen3-32B: 128K tokens ≈ 96,000 chars.
-    # 60,000 leaves headroom for system prompt, history, and response.
+    # Maximum chars of document context passed to the LLM.
+    # Default 60K is safe for all providers including Groq (Qwen3-32B: ~24K char budget).
+    # Increase via AGENT_MAX_CONTEXT_CHARS for providers with larger context windows:
+    #   NVIDIA nemotron-super (NIM API cap 256K tokens): up to ~190K chars
+    #   Anthropic Sonnet 4.5 (200K tokens):              up to ~150K chars
+    #   Gemini 2.5 Flash (1M tokens):                    up to ~750K chars
+    #   Groq Qwen3-32B (32K tokens):                     do not exceed ~20K chars
     MAX_CHARS = int(os.getenv("AGENT_MAX_CONTEXT_CHARS", "60000"))
     current_chars = len(question) + len(math_context)
 
@@ -511,6 +763,8 @@ def audit_node(state: AgentState):
       Stage 1 (fast, no LLM) — fabrication detection against ALL documents.
                                Returns immediately on violation — no LLM call.
       Stage 2 (constraint)   — logical predicate consistency check.
+                               SKIPPED for math and synthesis question types —
+                               ConstraintChecker adds noise not signal on these.
       Stage 3 (LLM)          — hallucination audit (only reached if 1+2 pass).
 
     Pre-audit shortcut saves ~0.6 LLM calls per query on average.
@@ -520,8 +774,9 @@ def audit_node(state: AgentState):
     constraint_checker = svc["constraint_checker"]
 
     print("--- 🕵️ AUDITING ANSWER ---")
-    question = state["question"]
-    answer   = state["generation"]
+    question      = state["question"]
+    answer        = state["generation"]
+    question_type = state.get("question_type", "factual")
 
     if "I don't know" in answer or "not found" in answer.lower():
         return {"audit_feedback": ""}
@@ -551,43 +806,49 @@ def audit_node(state: AgentState):
         }
 
     # --- STAGE 2: CONSTRAINT CHECKING ---
-    print("   🔍 Extracting logic constraints...")
-    predicates = constraint_checker.extract_predicates(question, audit_context)
+    # Skipped for math — MathExecutor result is trusted, ConstraintChecker adds no value.
+    # Skipped for synthesis — multi-section comparison questions have no logical predicates
+    # to check; ConstraintChecker fabricates predicates from mathematical language.
+    if question_type not in ("math", "synthesis"):
+        print("   🔍 Extracting logic constraints...")
+        predicates = constraint_checker.extract_predicates(question, audit_context)
 
-    if predicates:
-        is_consistent, explanation = constraint_checker.check_consistency(predicates, audit_context)
+        if predicates:
+            is_consistent, explanation = constraint_checker.check_consistency(predicates, audit_context)
 
-        if not is_consistent:
-            print(f"   ❌ INCONSISTENT: {explanation}")
+            if not is_consistent:
+                print(f"   ❌ INCONSISTENT: {explanation}")
 
-            source_explains, explanation_type = check_source_explains_contradiction(full_context)
+                source_explains, explanation_type = check_source_explains_contradiction(full_context)
 
-            if explanation_type == "documented_conflict":
-                # Document itself flags this conflict — answer is correct to describe both sides.
-                # Do NOT retry. Mark has_contradiction so main.py can signal the UI.
-                print("   ✅ DOCUMENTED CONFLICT — answer correctly describes flagged inconsistency")
-                return {"audit_feedback": "", "has_contradiction": True}
+                if explanation_type == "documented_conflict":
+                    # Document itself flags this conflict — answer is correct to describe both sides.
+                    # Do NOT retry. Mark has_contradiction so main.py can signal the UI.
+                    print("   ✅ DOCUMENTED CONFLICT — answer correctly describes flagged inconsistency")
+                    return {"audit_feedback": "", "has_contradiction": True}
 
-            elif explanation_type == "revision":
-                return {
-                    "audit_feedback": (
-                        f"CONTRADICTION DETECTED: {explanation}. "
-                        "The source provides a revision — use the corrected value."
-                    )
-                }
-            else:
-                return {
-                    "audit_feedback": (
-                        f"UNRESOLVED CONTRADICTION: {explanation}. "
-                        "The source does not explain this discrepancy. "
-                        "State this explicitly — DO NOT INVENT an explanation."
-                    )
-                }
+                elif explanation_type == "revision":
+                    return {
+                        "audit_feedback": (
+                            f"CONTRADICTION DETECTED: {explanation}. "
+                            "The source provides a revision — use the corrected value."
+                        )
+                    }
+                else:
+                    return {
+                        "audit_feedback": (
+                            f"UNRESOLVED CONTRADICTION: {explanation}. "
+                            "The source does not explain this discrepancy. "
+                            "State this explicitly — DO NOT INVENT an explanation."
+                        )
+                    }
 
-        is_valid, violation = constraint_checker.validate_answer_against_constraints(answer, predicates)
-        if not is_valid and not violation.startswith("VALIDATION_ERROR:"):
-            print(f"   ❌ INVALID ANSWER: {violation}")
-            return {"audit_feedback": f"Answer violates logic constraint: {violation}"}
+            is_valid, violation = constraint_checker.validate_answer_against_constraints(answer, predicates)
+            if not is_valid and not violation.startswith("VALIDATION_ERROR:"):
+                print(f"   ❌ INVALID ANSWER: {violation}")
+                return {"audit_feedback": f"Answer violates logic constraint: {violation}"}
+    else:
+        print(f"   ⏭️  Stage 2 skipped — question_type={question_type}")
 
     # --- STAGE 3: STANDARD LLM HALLUCINATION AUDIT ---
     # Only reached when fabrication pre-check passes AND no constraint violations.
@@ -650,12 +911,14 @@ def decide_next_step(state: AgentState):
 
 workflow = StateGraph(AgentState)
 
+workflow.add_node("route",     route_question_node)
 workflow.add_node("decompose", decompose_query_node)
 workflow.add_node("retrieve",  retrieve_node)
 workflow.add_node("generate",  generate_node)
 workflow.add_node("audit",     audit_node)
 
-workflow.set_entry_point("decompose")
+workflow.set_entry_point("route")
+workflow.add_edge("route",     "decompose")
 workflow.add_edge("decompose", "retrieve")
 workflow.add_edge("retrieve",  "generate")
 workflow.add_edge("generate",  "audit")

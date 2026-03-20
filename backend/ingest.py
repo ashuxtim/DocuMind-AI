@@ -7,7 +7,8 @@ from parser import SmartPDFParser
 from graph_agent import get_graph_builder
 from knowledge_graph import KnowledgeBase
 
-CLOUD_PROVIDERS = {"vllm", "openai", "gemini", "groq", "anthropic", "cohere", "nvidia"}
+# "vllm" removed — vLLM provider is no longer part of the stack
+CLOUD_PROVIDERS = {"openai", "gemini", "groq", "anthropic", "cohere", "nvidia"}
 
 
 class DocuMindIngest:
@@ -17,11 +18,14 @@ class DocuMindIngest:
         self.agent = get_graph_builder()
         self.kb = KnowledgeBase()
 
-        self.provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+        self.provider = os.getenv("LLM_PROVIDER", "nvidia").lower()
         self.is_cloud = self.provider in CLOUD_PROVIDERS
         self.concurrency = 5 if self.is_cloud else 1
 
-        # One Redis client for the lifetime of this ingestor
+        # Redis client for the lifetime of this ingestor.
+        # NOTE: no longer used for inference locking (Ollama lock removed).
+        # Retained for job queue usage in main.py — remove here if job queue
+        # manages its own Redis connection independently.
         redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
         self.redis_client = redis.Redis.from_url(redis_url)
 
@@ -68,7 +72,7 @@ class DocuMindIngest:
                     print(f"   ⚠️ LLM error attempt {attempt+1} — retrying in {delay:.0f}s: {e}")
 
                 await asyncio.sleep(delay)
-        
+
     async def process_document(self, file_path: str, filename: str, cancellation_token):
         """Orchestrates ingestion: Dedup -> Parse -> Vector (batch) -> Graph (concurrent)"""
         print(f"🚀 Processing: {filename}")
@@ -156,29 +160,11 @@ class DocuMindIngest:
         chunk_id = f"{filename}::chunk_{i}::page_{page_num}"
 
         try:
-            if self.is_cloud:
-                graph = await self._call_with_retry(
-                    self.agent.extract_relationships, text, chunk_id, filename
-                )
-            else:
-                r_lock = self.redis_client.lock("ollama_inference_lock", timeout=300)
-                print(f"   ⏳ Chunk {i} waiting for Ollama availability...")
-
-                graph = {"nodes": [], "edges": []}
-                acquired = await asyncio.to_thread(r_lock.acquire, blocking=True, blocking_timeout=290)
-
-                if not acquired:
-                    print(f"   ⚠️ Chunk {i}: lock timeout — skipping graph extraction")
-                    return
-
-                try:
-                    if not cancellation_token():
-                        graph = await self._call_with_retry(
-                            self.agent.extract_relationships, text, chunk_id, filename
-                        )
-                finally:
-                    if r_lock.owned():
-                        r_lock.release()
+            # Ollama Redis inference lock removed — all providers are now cloud API.
+            # Concurrency is governed by self.semaphore in extract_graph_safe above.
+            graph = await self._call_with_retry(
+                self.agent.extract_relationships, text, chunk_id, filename
+            )
 
             if graph.get("nodes"):
                 all_graphs.append(graph)

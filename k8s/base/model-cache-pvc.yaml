@@ -8,3 +8,8 @@ spec:
   resources:
     requests:
       storage: 5Gi
+# Caches HuggingFace models across pod restarts:
+#   - BAAI/bge-small-en-v1.5 (Chonkie semantic chunker, ~130MB)
+#   - yolox_l0.05.onnx (unstructured layout detection, ~100MB)
+#   - microsoft/table-transformer-structure-recognition (~200MB)
+# Without this, every cold start re-downloads all models from HuggingFace.

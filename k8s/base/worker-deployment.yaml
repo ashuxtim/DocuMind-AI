@@ -1,16 +1,13 @@
 # ─── DEPLOYMENT: Celery Worker ─────────────────────────────────
+# Same image as FastAPI, different command.
+# Uses same ConfigMap and Secret (shared config).
 #
-# WHAT THIS REPLACES from docker-compose:
-#   worker:
-#     build: ./backend
-#     command: celery -A celery_app.celery_app worker --loglevel=info
-#     env_file: .env
-#     depends_on: [redis, init-ollama]
-#
-# KEY DIFFERENCES IN K8S:
-# - Same image as FastAPI, different CMD (via 'command' override)
-# - Uses same ConfigMap & Secret (shared config)
-# - No depends_on — K8s handles startup order via readiness probes
+# IMAGE NOTE: image tag must be rebuilt to reflect the API stack
+# upgrade (sentence-transformers removed, NVIDIA NIM added).
+# Build and load before applying:
+#   docker build -t documind-fastapi:v2.0 .
+#   minikube image load documind-fastapi:v2.0
+# Then update the image field below to match.
 # ────────────────────────────────────────────────────────────────
 
 apiVersion: apps/v1
@@ -77,6 +74,9 @@ spec:
           mountPath: /app/uploads
         - name: model-cache
           mountPath: /root/.cache/huggingface
+
+        # model-cache caches bge-small-en-v1.5 (Chonkie) and unstructured
+        # vision models across pod restarts via the model-cache PVC.
 
       volumes:
       - name: uploads

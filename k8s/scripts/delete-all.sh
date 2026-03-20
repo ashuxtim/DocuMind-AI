@@ -7,13 +7,8 @@
 # 2. Deployments (stop app layer)
 # 3. StatefulSets (stop databases — PVCs are preserved!)
 # 4. Services (stop routing)
-# 5. ConfigMaps (optional)
+# 5. ConfigMaps
 # 6. PVCs (⚠️ ONLY if user confirms — contains data!)
-#
-# WHY PVCs ARE KEPT:
-# Deleting a StatefulSet does NOT delete its PVCs.
-# This is intentional — your database data survives.
-# Only delete PVCs if you want a truly clean slate.
 # ────────────────────────────────────────────────────────────────
 
 YELLOW='\033[1;33m'
@@ -22,9 +17,9 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 echo ""
-echo "═══════════════════════════════════════════════"
+echo "═══════════════════════════════════════════════════"
 echo " 🗑️  Deleting DocuMind from Kubernetes"
-echo "═══════════════════════════════════════════════"
+echo "═══════════════════════════════════════════════════"
 echo ""
 
 # Step 1: Ingress
@@ -44,7 +39,7 @@ kubectl delete -f k8s/base/qdrant-statefulset.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/neo4j-statefulset.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/minio-statefulset.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/redis-deployment.yaml --ignore-not-found=true
-kubectl delete -f k8s/base/ollama-statefulset.yaml --ignore-not-found=true
+# Ollama statefulset removed — no longer part of the stack
 echo -e "  ${GREEN}✅ StatefulSets removed (PVCs preserved)${NC}"
 
 # Step 4: Services
@@ -57,8 +52,7 @@ kubectl delete -f k8s/base/neo4j-headless-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/neo4j-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/minio-headless-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/base/minio-service.yaml --ignore-not-found=true
-kubectl delete -f k8s/base/ollama-headless-service.yaml --ignore-not-found=true
-kubectl delete -f k8s/base/ollama-service.yaml --ignore-not-found=true
+# Ollama services removed — no longer part of the stack
 echo -e "  ${GREEN}✅ Services removed${NC}"
 
 # Step 5: ConfigMaps
@@ -89,12 +83,11 @@ else
 fi
 
 echo ""
-echo "═══════════════════════════════════════════════"
+echo "═══════════════════════════════════════════════════"
 echo -e " ${GREEN}✅ Teardown Complete${NC}"
-echo "═══════════════════════════════════════════════"
+echo "═══════════════════════════════════════════════════"
 echo ""
 
-# Show remaining resources
 REMAINING=$(kubectl get all --no-headers 2>/dev/null | grep -v "kubernetes" | wc -l)
 if [ "$REMAINING" -eq 0 ]; then
     echo " No DocuMind resources remaining (clean slate)."

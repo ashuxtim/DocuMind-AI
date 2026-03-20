@@ -293,7 +293,7 @@ def _apply_registry_to_graphs(
 
 class GraphBuilder:
     def __init__(self):
-        self.llm = get_llm_provider()
+        self.llm = get_llm_provider(role="extraction")
         self.model_name = self.llm.get_model_name()
         print(f"🤖 GraphBuilder initialized with: {self.model_name}")
 

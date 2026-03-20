@@ -7,9 +7,9 @@ from qdrant_client.models import (
     Filter, FieldCondition, MatchValue, MatchAny,
     PayloadSchemaType
 )
-from sentence_transformers import SentenceTransformer
+from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 
-# Fix 6 — batch size constant
+# Qdrant upsert batch size — kept conservative to avoid timeouts on large documents
 UPSERT_BATCH_SIZE = 100
 
 
@@ -20,7 +20,7 @@ class VectorStore:
 
         print(f"🔌 Connecting to Vector DB at {host}:{port}...")
 
-        # Fix 8 — gRPC transport (2-3x throughput on upsert/search)
+        # gRPC transport (2-3x throughput on upsert/search)
         self.client = QdrantClient(
             host=host,
             port=port,
@@ -29,13 +29,17 @@ class VectorStore:
         )
         self.collection_name = collection_name
 
-        # Fix 5 — upgrade from all-MiniLM-L6-v2 to BGE base
-        # Better retrieval on domain-specific text, explicit CPU for 16GB system
-        self.embedding_model = SentenceTransformer(
-            "BAAI/bge-base-en-v1.5",
-            device="cpu"
+        # NVIDIA NIM embeddings — replaces local SentenceTransformer (BGE)
+        # Model: llama-nemotron-embed-1b-v2 — 2048-dim, 8192-token context, commercial use
+        # LangChain client batches embed_documents() at 50 passages/request internally.
+        # ingest.py sends batches of 20, so every call fits within one API request.
+        # Vectors are L2-normalised by the API — normalize_embeddings is not a caller concern.
+        self.embedding_model = NVIDIAEmbeddings(
+            model=os.getenv("EMBED_MODEL", "nvidia/nv-embedqa-mistral-7b-v2"),
+            api_key=os.getenv("NVIDIA_API_KEY"),
+            truncate="END"
         )
-        self.vector_size = 768  # Fix 5 — updated from 384
+        self.vector_size = int(os.getenv("EMBED_DIM", "4096"))
 
         try:
             self._ensure_collection()
@@ -49,32 +53,32 @@ class VectorStore:
         if not exists:
             print(f"🧠 Creating Qdrant collection: {self.collection_name}")
 
-            # Fix 3 + Fix 4 — payload indexes + on_disk to save RAM
+            # payload indexes + on_disk to save RAM
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
                     size=self.vector_size,
                     distance=Distance.COSINE,
-                    on_disk=True    # Fix 4 — vectors stored on disk, not in RAM
+                    on_disk=True    # vectors stored on disk, not in RAM
                 )
             )
 
-            # Fix 3 — payload indexes for fast filtered search and deletion
+            # payload indexes for fast filtered search and deletion
             self._create_payload_indexes()
 
         else:
-            # Fix 3 partial — backfill indexes on existing collections
-            # Safe to call even if index already exists — Qdrant ignores duplicates
+            # Backfill indexes on existing collections.
+            # Safe to call even if index already exists — Qdrant ignores duplicates.
             print(f"🔍 Collection exists — verifying payload indexes...")
             self._create_payload_indexes()
 
-            # Warn if existing collection has wrong vector size (e.g. old 384-dim)
+            # Warn if existing collection has wrong vector size (e.g. old 768-dim BGE)
             info = self.client.get_collection(self.collection_name)
             existing_size = info.config.params.vectors.size
             if existing_size != self.vector_size:
                 print(f"⚠️  VECTOR SIZE MISMATCH: collection has {existing_size}-dim vectors "
                       f"but model produces {self.vector_size}-dim. "
-                      f"Delete the collection and re-ingest all documents.")
+                      f"Run `make wipe-qdrant` and re-ingest all documents.")
 
     def _create_payload_indexes(self):
         index_fields = [
@@ -92,14 +96,14 @@ class VectorStore:
                 )
                 print(f"   ✅ Payload index ready: {field_name}")
             except Exception as e:
-                # Qdrant raises if index already exists — that is expected and safe to ignore
-                # Any other error is a real failure and must be visible
+                # Qdrant raises if index already exists — that is expected and safe to ignore.
+                # Any other error is a real failure and must be visible.
                 if "already exists" in str(e).lower():
                     print(f"   ℹ️  Payload index already exists: {field_name}")
                 else:
                     raise RuntimeError(f"Failed to create payload index '{field_name}': {e}") from e
 
-    # Fix 2 — deterministic ID from filename + full text content
+    # Deterministic ID from filename + full text content.
     # Deliberately excludes chunk_idx — ingest.py calls add_documents one chunk at a time
     # so idx always resets to 0. Full text hash is collision-safe and position-independent.
     def _make_point_id(self, filename: str, text: str) -> str:
@@ -110,25 +114,21 @@ class VectorStore:
         if not texts:
             return
 
-        # Fix 1 — normalize_embeddings=True for correct cosine similarity scores
-        # Fix 6 — batch_size=32 for memory-efficient encoding, progress bar for large docs
-        embeddings = self.embedding_model.encode(
-            texts,
-            batch_size=32,
-            normalize_embeddings=True,
-            show_progress_bar=len(texts) > 50
-        ).tolist()
+        # NVIDIAEmbeddings.embed_documents() handles batching internally (max 50/request).
+        # ingest.py sends batches of 20 — always within one API request.
+        # Returns L2-normalised vectors — no post-processing needed.
+        embeddings = self.embedding_model.embed_documents(texts)
 
         points = [
             PointStruct(
-                id=self._make_point_id(filename, text),  # Fix 2
+                id=self._make_point_id(filename, text),
                 vector=emb,
                 payload={**meta, "text": text, "source": filename}
             )
             for i, (text, meta, emb) in enumerate(zip(texts, metadatas, embeddings))
         ]
 
-        # Fix 6 — batch upsert, no timeouts on large documents
+        # Batch upsert to Qdrant — avoids timeouts on large documents
         num_batches = -(-len(points) // UPSERT_BATCH_SIZE)  # ceiling division
         for i in range(0, len(points), UPSERT_BATCH_SIZE):
             batch = points[i : i + UPSERT_BATCH_SIZE]
@@ -137,14 +137,9 @@ class VectorStore:
         print(f"   -> Indexed {len(points)} chunks in {num_batches} batch(es).")
 
     def search(self, query: str, limit: int = 15, filters: Dict[str, Any] = None) -> List[Dict]:
-        # Fix 5 — BGE query instruction prefix for best retrieval accuracy
-        prefixed_query = f"Represent this sentence for searching relevant passages: {query}"
-
-        # Fix 1 — normalize_embeddings=True, consistent with add_documents
-        query_vector = self.embedding_model.encode(
-            prefixed_query,
-            normalize_embeddings=True
-        ).tolist()
+        # embed_query() handles the query/passage asymmetry internally.
+        # BGE instruction prefix removed — it was BGE-specific and does not apply here.
+        query_vector = self.embedding_model.embed_query(query)
 
         query_filter = None
         if filters:
@@ -157,14 +152,17 @@ class VectorStore:
             if conditions:
                 query_filter = Filter(must=conditions)
 
-        # Fix 7 — score_threshold drops irrelevant results before reranking
+        # score_threshold drops clearly irrelevant results before reranking.
+        # Default 0.30 is a starting point — tune via AGENT_MIN_VECTOR_SCORE after re-ingest.
+        # Both thresholds (vector + reranker) are env-var controlled for production tuning.
+        min_score = float(os.getenv("AGENT_MIN_VECTOR_SCORE", "0.30"))
         search_result = self.client.query_points(
             collection_name=self.collection_name,
             query=query_vector,
             query_filter=query_filter,
             limit=limit,
             with_payload=True,
-            score_threshold=0.30    # Fix 7 — tune after re-ingestion if needed
+            score_threshold=min_score
         ).points
 
         return [
@@ -177,7 +175,7 @@ class VectorStore:
         ]
 
     def delete_file(self, filename: str):
-        # Fix 3 — source field is now indexed, this is O(log n) not O(n)
+        # source field is indexed — this is O(log n) not O(n)
         self.client.delete(
             collection_name=self.collection_name,
             points_selector=Filter(

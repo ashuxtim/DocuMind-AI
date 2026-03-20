@@ -48,6 +48,8 @@ build/
 # Environment files
 # =========================
 .env
+backend/.env
+frontend/.env
 .env.*
 !.env.example
 

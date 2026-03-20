@@ -1,1076 +1,741 @@
+<div align="center">
+
 # 🧠 DocuMind AI
 
-![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![Neo4j](https://img.shields.io/badge/Neo4j-008CC1?style=for-the-badge&logo=neo4j&logoColor=white)
-![Qdrant](https://img.shields.io/badge/Qdrant-DC244C?style=for-the-badge&logo=qdrant&logoColor=white)
-![LangChain](https://img.shields.io/badge/LangChain-121212?style=for-the-badge&logo=chainlink&logoColor=white)
-![OpenAI](https://img.shields.io/badge/OpenAI-412991?style=for-the-badge&logo=openai&logoColor=white)
-![Ollama](https://img.shields.io/badge/Ollama-000000?style=for-the-badge&logo=ollama&logoColor=white)
-![Celery](https://img.shields.io/badge/Celery-37814A?style=for-the-badge&logo=celery&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+### Hybrid RAG + Knowledge Graph Intelligence for Complex Document Reasoning
 
-**Hybrid RAG + Knowledge Graph Intelligence for Complex Document Reasoning**  
-*Multi-provider LLM orchestration with constraint-aware generation and graph-augmented retrieval*
+*A production-grade, multi-agent pipeline featuring dual-model orchestration,*  
+*OS-level math sandboxing, and strict constraint verification — deployed on Kubernetes.*
 
-[🚀 Quick Start](#-installation) • [🏗️ Architecture](#️-architecture) • [📊 Metrics](#-performance-metrics) • [🤖 AI Features](#-key-features)
+<br/>
 
----
+[![Python](https://img.shields.io/badge/Python-3.10-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-19.2-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
+[![LangGraph](https://img.shields.io/badge/LangGraph-121212?style=for-the-badge&logo=chainlink&logoColor=white)](https://langchain-ai.github.io/langgraph)
 
-## 🎯 The Hook
+[![NVIDIA NIM](https://img.shields.io/badge/NVIDIA_NIM-76B900?style=for-the-badge&logo=nvidia&logoColor=black)](https://build.nvidia.com)
+[![Qdrant](https://img.shields.io/badge/Qdrant-DC244C?style=for-the-badge&logo=qdrant&logoColor=white)](https://qdrant.tech)
+[![Neo4j](https://img.shields.io/badge/Neo4j-008CC1?style=for-the-badge&logo=neo4j&logoColor=white)](https://neo4j.com)
+[![MinIO](https://img.shields.io/badge/MinIO-C7202C?style=for-the-badge&logo=minio&logoColor=white)](https://min.io)
 
-DocuMind AI tackles the fundamental challenge of **hallucination-resistant document understanding** through a hybrid retrieval architecture that combines dense vector search with symbolic knowledge graph reasoning. Traditional RAG systems fail when documents contain contradictory information, require multi-hop reasoning, or need mathematical calculations—DocuMind solves this through a **multi-agent pipeline** with built-in constraint checking and code execution capabilities.
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)
+[![Celery](https://img.shields.io/badge/Celery-37814A?style=for-the-badge&logo=celery&logoColor=white)](https://docs.celeryq.dev)
+[![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io)
+[![CI/CD](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/features/actions)
 
-The system implements a **3-stage agentic workflow** (decompose → retrieve → audit) powered by LangGraph state machines, enabling:
+<br/>
 
-→ **Graph-Augmented Retrieval**: Neo4j knowledge graphs capture entity relationships missed by pure vector similarity  
-→ **Multi-Provider LLM Orchestration**: Seamlessly switch between Ollama, vLLM, OpenAI, and Gemini with unified interface  
-→ **Constraint-Aware Generation**: Predicate extraction and consistency checking prevent fabricated explanations  
-→ **Code-Assisted Math Reasoning**: Safe Python execution for quantitative questions from document context  
-→ **RAGAS-Validated Quality**: Continuous evaluation of context precision, answer relevance, and faithfulness metrics  
+[🎯 Overview](#-overview) • [🏗️ Architecture](#️-architecture) • [🧠 AI Pipeline](#-the-ai-pipeline) • [🧮 Math Sandbox](#-math-execution--os-level-sandboxing) • [📊 Confidence Scoring](#-confidence-scoring--penalties) • [🛠️ Stack](#️-technology-stack) • [🚢 Deployment](#-kubernetes-deployment) • [🧪 Evaluation](#-evaluation)
 
-> *"DocuMind doesn't just retrieve—it reasons. By fusing vector semantics with graph topology and constraint validation, we achieve significantly reduced hallucination rates on adversarial document QA tasks."*
+</div>
 
 ---
 
-## ⚡ Project Showcase
+## 🎯 Overview
 
-![DocuMind Architecture](https://via.placeholder.com/1200x400/1a1a2e/eaeaea?text=Multi-Agent+RAG+Pipeline+Visualization)
+DocuMind AI is a **hallucination-resistant document intelligence platform** built for financial and technical documents. It fuses **4096-dimensional dense vector retrieval** with **knowledge graph topology**, brokered by a LangGraph state machine.
 
-### Technical Highlights
+Traditional RAG fails at math, breaks on conflicting evidence, and hallucinates causality. DocuMind solves all three:
 
-> **Dual-Retrieval Hybrid Architecture**  
-> Qdrant vector search (384-dim sentence-transformers) + Neo4j graph traversal (3-hop entity relationships)
+<br/>
 
-> **Optimized Query Latency**: Efficient retrieval for complex multi-hop queries
+<table>
+<tr>
+<td width="33%">
 
-> **Multi-Stage Agent Graph** 
-> LangGraph state machine with 4 core nodes: decompose_query → retrieve → generate → audit. Features a conditional feedback loop that routes failed audits back to the generator with explicit correction instructions.  
+**🔬 Hybrid Retrieval**  
+Qdrant 4096-dim vector search fused with 2-hop Neo4j graph traversal. NVIDIA NIM reranker filters to the Top 7 most relevant chunks.
 
-> **Context Window Management**: Character-based semantic chunking with 2000-character limits
+</td>
+<td width="33%">
 
-> **Knowledge Graph Intelligence**  
-> LLM-powered relationship extraction from document entities
+**🧮 Sandboxed Math**  
+Intercepts quantitative queries and executes LLM-generated Python with OS-level `RLIMIT_AS` (256MB) and `RLIMIT_CPU` (10s) resource caps.
 
-> **Graph Statistics**: Dynamic entity classification with real-time subgraph querying
+</td>
+<td width="33%">
 
----
+**🛡️ 3-Stage Audit**  
+Every answer passes regex → NetworkX circular dependency → LLM fabrication detection before reaching the user.
 
-### 🏗️ Architecture & Technologies
+</td>
+</tr>
+<tr>
+<td>
 
-| 🤖 LLM Stack | 🧠 Knowledge Layer | ⚡ AI Infrastructure |
-|-------------|-------------------|---------------------|
-| **Providers**: Ollama, vLLM, OpenAI (GPT-4), Gemini | **Vector Store**: Qdrant (dense retrieval) | **Framework**: LangGraph (agent orchestration) |
-| **Embeddings**: sentence-transformers | **Graph DB**: Neo4j (entity relationships) | **Evaluation**: RAGAS (faithfulness, answer relevancy) |
-| **Router**: Dynamic provider selection | **Chunking**: Unstructured (title-based semantic splits) | **Tracing**: LangSmith (@traceable decorators) |
-| **Guardrails**: Constraint-based validation | **Indexing**: Dense Vector Retrieval (Qdrant) | **Tasks**: Celery + Redis (async processing) |
+**🧬 Dual-Model Design**  
+A primary reasoning LLM and a separate structured extraction LLM (Qwen 2.5 Coder) work in parallel — one generates, one validates.
 
----
+</td>
+<td>
 
-## 📈 Performance Metrics
+**🔗 RapidFuzz Coreference**  
+Entities deduplicated via `token_sort_ratio`. Matches >85% auto-merged; ambiguous clusters (60–84%) escalated to the LLM.
 
-| Component | Technology | Key Metrics |
-|-----------|-----------|-------------|
-| **Embedding Generation** | sentence-transformers | 384-dimensional embeddings |
-| **Vector Retrieval** | Qdrant | Top-K semantic search with dynamic metadata filtering |
-| **Graph Traversal** | Neo4j Cypher | 3-hop relationship queries |
-| **LLM Inference** | Multi-provider routing | OpenAI (GPT-4), Ollama (local), vLLM (optimized) |
-| **Document Ingestion** | Celery background tasks | Async processing with progress tracking |
-| **Constraint Checking** | Custom NLP + LLM validation | Predicate extraction, circular dependency detection |
-| **Code Execution** | Sandboxed Python interpreter | Safe math calculations from document context |
-| **Quality Assurance** | RAGAS test suite | Faithfulness, answer relevancy |
+</td>
+<td>
+
+**📊 Penalized Confidence**  
+Scores aren't raw probabilities. They are mathematically penalized based on contradictions found and audit retries required.
+
+</td>
+</tr>
+</table>
 
 ---
 
 ## 🏗️ Architecture
 
-### DocuMind AI Intelligence Pipeline
+### The 7 Core Services
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Kubernetes Cluster                        │
+│                                                                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
+│  │   React 19   │───▶│   FastAPI    │───▶│  Celery Worker   │   │
+│  │   Frontend   │    │   Backend    │    │  (pool=solo)     │   │
+│  │  (Vite+Radix)│    │  2 replicas  │    │  1 replica       │   │
+│  └──────────────┘    └──────┬───────┘    └────────┬─────────┘   │
+│                             │                     │             │
+│            ┌────────────────┼─────────────────────┤             │
+│            ▼                ▼                     ▼             │
+│  ┌─────────────┐  ┌──────────────┐    ┌─────────────────────┐   │
+│  │    Redis    │  │    Qdrant    │    │        MinIO        │   │
+│  │   Broker    │  │  (4096-dim)  │    │   Object Storage    │   │
+│  │  24h TTL    │  │  StatefulSet │    │     StatefulSet     │   │
+│  └─────────────┘  └──────────────┘    └─────────────────────┘   │
+│                                                                  │
+│                   ┌──────────────┐                              │
+│                   │    Neo4j     │                              │
+│                   │  Graph DB    │                              │
+│                   │ StatefulSet  │                              │
+│                   └──────────────┘                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+| Service | Technology | Key Configuration |
+|---|---|---|
+| **API Server** | FastAPI | 2 replicas · 1000m CPU · 2Gi RAM |
+| **Worker** | Celery `pool=solo` | 1 replica · heavy PDF workloads |
+| **Broker / Cache** | Redis | Task state 24h TTL · dashboard cache 30s TTL |
+| **Vector DB** | Qdrant | 4096-dim · `on_disk=True` · COSINE distance |
+| **Graph DB** | Neo4j | StatefulSet · 512MB JVM Heap · 256MB Page Cache |
+| **Object Storage** | MinIO | S3-compatible · context-manager file download |
+| **Frontend** | React 19 + Vite | Tailwind CSS · Radix UI · `react-force-graph-2d` |
+
+### Sequence Flow
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant FastAPI
-    participant LangGraph Agent
-    participant Query Decomposer
-    participant Retrieval Layer
-    participant Vector Store (Qdrant)
-    participant Knowledge Graph (Neo4j)
-    participant Constraint Checker
-    participant Code Executor
-    participant LLM Provider
-    participant Audit Node
-    
-    User->>FastAPI: POST /query {question, history, selected_docs}
-    FastAPI->>LangGraph Agent: Initialize AgentState
-    
-    LangGraph Agent->>Query Decomposer: decompose_query_node()
-    Query Decomposer->>Query Decomposer: Extract sub-questions & entities
-    
-    Query Decomposer->>Retrieval Layer: retrieve_node()
-    
+    participant U as User
+    participant F as FastAPI
+    participant LG as LangGraph
+    participant RN as route_node
+    participant DN as decompose_node
+    participant RET as retrieve_node
+    participant Q as Qdrant
+    participant N as Neo4j
+    participant NIM as NVIDIA NIM Reranker
+    participant GEN as generate_node
+    participant ME as MathExecutor
+    participant AUD as audit_node
+    participant NX as NetworkX
+
+    U->>F: POST /query {question, history, selected_docs}
+    F->>LG: Initialize AgentState
+
+    LG->>RN: route_node()
+    RN->>RN: Classify intent → math | predicate | synthesis | factual
+    RN->>RN: Detect multi_entity flag
+
+    RN->>DN: decompose_node()
+    DN->>DN: synthesis? → force ≥3 distinct sub-queries
+    DN->>DN: simple? → pass through
+
+    DN->>RET: retrieve_node()
     par Hybrid Retrieval
-        Retrieval Layer->>Vector Store (Qdrant): Semantic search (top-K)
-        Vector Store (Qdrant)-->>Retrieval Layer: Ranked chunks + scores
+        RET->>Q: Vector search (Top-10, or Top-15 if multi_entity)
+        Q-->>RET: Scored chunks
+        RET->>RET: MD5 deduplicate (first 200 chars)
+        RET->>NIM: Rerank against original question
+        NIM-->>RET: Logit scores → discard < -5.0 → keep Top 7
     and
-        Retrieval Layer->>Knowledge Graph (Neo4j): Entity relationship query (3-hop)
-        Knowledge Graph (Neo4j)-->>Retrieval Layer: Graph subgraph data
+        RET->>N: 2-hop Cypher query (3-8 keywords)
+        N-->>RET: Connected entities + leaf context
     end
-    
-    Retrieval Layer->>LangGraph Agent: Combined context (vector + graph)
-    
-    LangGraph Agent->>Code Executor: Check if math reasoning needed
-    alt Math Question Detected
-        Code Executor->>Code Executor: Extract variables, generate Python code
-        Code Executor->>Code Executor: Execute in sandbox (subprocess)
-        Code Executor-->>LangGraph Agent: Calculation result
+    RET->>LG: Combined context (graph prepended)
+
+    LG->>GEN: generate_node()
+    alt Math Query Detected
+        GEN->>ME: Extract variables (source-prefixed dict)
+        ME->>ME: Generate Python code
+        ME->>ME: subprocess + RLIMIT_AS(256MB) + RLIMIT_CPU(10s)
+        ME-->>GEN: Verified calculation result
     end
-    
-    LangGraph Agent->>LLM Provider: generate_node() with context
-    LLM Provider->>LLM Provider: Route to provider (Ollama/OpenAI/Gemini)
-    LLM Provider-->>LangGraph Agent: Generated answer
-    
-    LangGraph Agent->>Constraint Checker: validate_answer_against_constraints()
-    Constraint Checker->>Constraint Checker: Extract predicates, check consistency
-    
-    alt Constraints Violated
-        Constraint Checker->>LLM Provider: Re-generate with feedback
-        LLM Provider-->>Constraint Checker: Revised answer
-    end
-    
-    LangGraph Agent->>Audit Node: audit_node()
-    Audit Node->>Audit Node: Detect fabrications & check constraints
-    
-    alt Fabrications Detected
-        Audit Node->>LangGraph Agent: Flag issues, decide_next_step()
-        LangGraph Agent->>Retrieval Layer: Re-retrieve with adjusted params
+    GEN->>GEN: Prune to AGENT_MAX_CONTEXT_CHARS (60,000)
+    GEN->>GEN: Inject audit_feedback if retry
+    GEN-->>LG: Draft answer
+
+    LG->>AUD: audit_node()
+    AUD->>AUD: Stage 1 — Regex (fabricated causal links)
+    AUD->>NX: Stage 2 — Build DiGraph(), is_directed_acyclic_graph()
+    NX-->>AUD: Circular dependency check
+    AUD->>AUD: Stage 3 — LLM auditor (date swaps, hallucinated numbers)
+
+    alt Fabrication Detected
+        AUD->>GEN: Inject audit_feedback → retry (confidence halved)
     else Clean
-        LangGraph Agent-->>FastAPI: Final validated answer + sources
+        AUD-->>F: Validated answer + penalized confidence score
     end
-    
-    FastAPI-->>User: QueryResponse {answer, sources, graph_data}
+
+    F-->>U: QueryResponse {answer, sources, confidence, graph_data}
 ```
-
-### Technical Deep Dive
-
-#### **Query Processing Layer**
-
-The system employs a **multi-stage decomposition strategy** to handle complex questions:
-
-→ **Query Keyword Extraction**: `extract_query_entities()` uses an LLM to distill questions into an optimized array of 3-8 targeted search keywords, prioritizing proper nouns, financial terms, and temporal markers.  
-→ **Sub-Question Generation**: `decompose_query_node()` breaks compound queries into atomic retrievable units  
-→ **Embedding Pipeline**: sentence-transformers generates 384-dim vectors with L2 normalization  
-→ **Hybrid Retrieval Strategy**:
-  - **Dense Search**: Qdrant cosine similarity with Top-K retrieval and dynamic payload filtering
-  - **Sparse Search**: Graph-based entity relationship traversal (1-3 hops via Cypher queries)
-  - **Fusion**: Graph context is explicitly extracted and prepended as priority knowledge (`--- RELEVANT GRAPH CONNECTIONS ---`) to ensure the LLM processes symbolic relationships first.
-
-→ **Context Optimization**:
-  - **Chunking**: Title-based semantic splits via Unstructured library (max 2000 chars, soft split at 1800, combines under 500)
-  - **Metadata Filtering**: Document source tracking, timestamp-based relevance, entity type constraints
-  - **Reranking**: Active Cross-Encoder (`ms-marco-MiniLM-L-6-v2`) scoring against the original query with a strict minimum relevance threshold (0.35) to filter out low-quality chunks.
-
-#### **LLM Orchestration**
-
-DocuMind implements a **provider-agnostic LLM interface** with automatic failover:
-
-→ **Model Selection Logic**:
-```python
-class LLMProvider:
-    def generate(prompt, context, constraints):
-        # Multi-provider routing with fallback chain
-        # 1. Try vLLM (local, optimized)
-        # 2. Fallback to Ollama (local, general)
-        # 3. Fallback to OpenAI (cloud, powerful)
-        # 4. Fallback to Gemini (cloud, alternative)
-```
-
-→ **Prompt Engineering Patterns**:
-  - **System Prompts**: Constraint-aware instructions with retrieval context injection
-  - **Few-Shot Examples**: Dynamic example selection based on query similarity
-  - **Chain-of-Thought**: Explicit reasoning steps for multi-hop questions
-  - **JSON Mode**: Structured output parsing for graph data extraction
-
-→ **Context Window Management**:
-  - **Dynamic Token Calculation**: Estimates input tokens mathematically (`chars / 3.5`) and actively adjusts the `max_tokens` generation parameter to fit within the 4096 context window without truncation.
-  - **Memory Strategies**: Redis-backed conversation history (last 10 turns)
-  - **Token Counting**: Pre-flight validation before LLM calls to prevent truncation
-
-→ **Output Parsing & Validation**:
-  - **Structured Generation**: Pydantic models enforce response schemas
-  - **Retry Logic**: Single-pass retry mechanism that injects specific audit violations back into the LLM context.
-
-#### **Knowledge Management**
-
-##### **Vector Store Architecture (Qdrant)**
-
-→ **Indexing Strategy**:
-  - **Collection Schema**: Unified global indexing with 384-dimensional vectors using `Distance.COSINE`.
-  - **Payload Structure**: `{text, source, page, chunk_id, section, type}`
-  - **Document Lifecycle Management**: Targeted `delete_file()` method completely wipes specific document vectors from the index without requiring full collection rebuilds.
-
-→ **Search Optimization**:
-  - **Broad Top-K Retrieval**: Retrieves a wider baseline of chunks (default: 15) to ensure maximum recall before passing data to the agentic reranker.
-  - **Metadata-Driven Execution**: Supports dynamic `Filter` injection to instantly narrow search spaces to specific documents or sections before calculating vector similarity.
-  - **Payload Projection**: Extracts and normalizes Qdrant's internal data structures back into clean application dictionaries (`{text, metadata, score}`) on the fly.
-
-##### **Knowledge Graph (Neo4j)**
-
-→ **Entity Extraction Methods**:
-  - **LLM-Powered NER**: `extract_relationships()` uses GPT-4 for high-precision entity recognition
-  - **Relationship Modeling**: Typed edges (MENTIONS, RELATES_TO, DEFINES, CONTRADICTS)
-  - **Chunked Processing**: Documents split into 2000-character semantic segments before extraction
-
-→ **Schema Design**:
-```
-// Node Constraints
-CREATE CONSTRAINT entity_name IF NOT EXISTS FOR (e:Entity) REQUIRE e.name IS UNIQUE
-CREATE CONSTRAINT statute_name IF NOT EXISTS FOR (s:Statute) REQUIRE s.name IS UNIQUE
-CREATE CONSTRAINT person_name IF NOT EXISTS FOR (p:Person) REQUIRE p.name IS UNIQUE
-CREATE CONSTRAINT org_name IF NOT EXISTS FOR (o:Organization) REQUIRE o.name IS UNIQUE
-
-// Universal Edge Structure
-(:Entity)-[r:RELATION {type, source, page, corroboration_strength, temporal_version}]->(:Entity)
-```
-
-→ **Traversal Algorithms**:
-  - **Subgraph Extraction**: `query_subgraph()` retrieves 1-3 hop neighborhoods
-  - **Relationship Filtering**: Entity type constraints (PERSON, ORGANIZATION, CONCEPT, etc.)
-  - **Visualization Data**: NetworkX serialization for force-directed graph rendering
-
-→ **Query Optimization**:
-  - **Indexed Lookups**: Entity names have BTREE indexes for O(log n) search
-  - **Parameterized Cypher**: Prepared statements prevent injection and improve caching
-  - **Connection Pooling**: Persistent Neo4j driver with automatic retry on transient failures
 
 ---
 
-## ✨ Key Features
+## 🧠 The AI Pipeline
 
-### AI & Machine Learning Engineering
+### Stage 1 — Ingestion (Celery Worker)
 
-#### **Multi-Agent RAG Pipeline**
+The ingestion pipeline is an async, multi-stage process triggered by `POST /upload` and executed by the Celery worker after downloading the file from MinIO:
 
-**LangGraph State Machine Architecture**:
-  - **AgentState Schema**: `{question, history, sub_queries, documents, generation, audit_feedback, retry_count, sources}`
-  - **Node Functions**:
-    - `decompose_query_node()`: Breaks complex questions into independently retrievable sub-queries.
-    - `retrieve_node()`: Sequential multi-query retrieval with balanced result merging + graph context injection, followed by Cross-Encoder reranking.
-    - `generate_node()`: Provider-routed LLM generation with smart context pruning and strict calculation injection.
-    - `audit_node()`: Fabrication detection and logic constraint checking.
-    - `decide_next_step()`: Conditional routing (Single-shot retry with explicit audit feedback loop, or END).
+```
+PDF/DOCX/TXT
+     │
+     ▼
+┌─────────────────────────────────────────────────┐
+│  LlamaParse  (llama-cloud)                      │
+│  → High-fidelity PDF → Markdown conversion      │
+│  → Tables preserved as authoritative blocks     │
+│  → is_authoritative=True flag set on tables     │
+└────────────────────────┬────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────┐
+│  Chonkie Semantic Chunker                        │
+│  Model : BAAI/bge-small-en-v1.5 (local, PVC)   │
+│  Limit : 512 tokens                             │
+│  Threshold : 0.5 similarity                     │
+│  Tables : never split (authoritative=True)      │
+└────────────────────────┬────────────────────────┘
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+┌──────────────────┐         ┌──────────────────────┐
+│  NVIDIA Embedder │         │  Structured LLM (NER)│
+│  nv-embedqa-     │         │  qwen2.5-coder-32b   │
+│  mistral-7b-v2   │         │  → 11 node types     │
+│  4096-dim        │         │  → SCREAMING_SNAKE   │
+│  → Qdrant store  │         │    relationships     │
+└──────────────────┘         └──────────┬───────────┘
+                                        │
+                                        ▼
+                             ┌──────────────────────┐
+                             │  RapidFuzz Coref     │
+                             │  token_sort_ratio    │
+                             │  >85% → auto-merge   │
+                             │  60-84% → LLM disamb │
+                             │  → Neo4j persist     │
+                             └──────────────────────┘
+```
 
-**Retrieval Strategies**:
-  - **Dense Vector Search**: Qdrant with sentence-transformers embeddings (all-MiniLM-L6-v2, 384-dim)
-  - **Context Injection**: Graph context is prepended to vector results for LLM processing
-  - **Iterative Refinement**: Audit failures trigger re-retrieval with adjusted parameters
+**Payload schema** stored per Qdrant chunk:
+```
+{ text, source, page, chunk_id, section, type, period, table_html, is_authoritative }
+```
 
-**Context Assembly Techniques**:
-  - **Chunk Deduplication**: Exact text-matching to remove redundant passages retrieved across multiple sub-queries.
-  - **Context Budget Management**: Smart character-limit pruning (12,000 chars) that prioritizes graph connections, recent conversation history, and top-scored vector chunks in that order.
-  - **Source Attribution**: Each chunk tagged with `{document, page, confidence_score}`
+---
 
-**Guardrails & Validation**:
-  - **Constraint Extraction**: `ConstraintChecker.extract_predicates()` parses logical rules from queries
-  - **Consistency Verification**: Circular dependency detection, mutual exclusivity checks
-  - **Retry Mechanism**: Single-shot retry with constraint feedback
+### Stage 2 — The 5-Node LangGraph Pipeline
 
-#### **LLM Integration Patterns**
+<details>
+<summary><strong>🗺️ Node 1 — <code>route_node</code>: Intent Classification</strong></summary>
 
-**Multi-Provider Support**:
-  - **Ollama**: Local model hosting (Auto-detects active model, defaults to qwen2.5:7b) at `localhost:11434`
-  - **vLLM**: Optimized inference server for high-throughput serving at `localhost:8000/v1`
-  - **OpenAI**: Cloud-based gpt-4o via official SDK
-  - **Gemini**: Google's gemini-1.5-flash via `google.genai` library
+Classifies every incoming query before any retrieval happens:
 
-**Dynamic Provider Routing**:
+| Intent | Description | Effect |
+|---|---|---|
+| `math` | Numerical calculation required | Routes to MathExecutor in generate_node |
+| `predicate` | Logical constraint query | Activates ConstraintChecker |
+| `synthesis` | Broad, "list all" type queries | Forces ≥3 sub-queries in decompose_node |
+| `factual` | Standard lookup question | Standard single-query retrieval |
+
+Also sets the `multi_entity` flag if multiple distinct entities are detected — dynamically widens Qdrant Top-K from 10 → 15.
+
+</details>
+
+<details>
+<summary><strong>🔀 Node 2 — <code>decompose_node</code>: Sub-Query Generation</strong></summary>
+
 ```python
-# Thread-Safe Singleton Routing
-def get_llm_provider() -> LLMProvider:
-    # 1. Thread locking prevents race conditions during high-concurrency ingestion
-    with _llm_lock:
-        if _llm_instance is not None:
-            return _llm_instance
-            
-        # 2. Environment-driven provider selection
-        provider_type = os.getenv("LLM_PROVIDER", "ollama").lower()
+# synthesis queries: forces a minimum of 3 sub-queries targeting different sections
+# factual / math: passes through as-is
+# AgentState carries: sub_queries[], question, history, retry_count, audit_feedback
+```
+
+For synthesis queries (e.g., *"list all risk factors across all sections"*), the LLM is instructed to generate sub-queries that explicitly target different sections or time periods, maximising recall across the full document.
+
+</details>
+
+<details>
+<summary><strong>🔍 Node 3 — <code>retrieve_node</code>: Hybrid Retrieval</strong></summary>
+
+**Vector Path (Qdrant)**
+```
+Top-K = 10 (or 15 if multi_entity=True)
+    → MD5 deduplication on first 200 characters
+    → NVIDIA Reranker: nvidia/nv-rerankqa-mistral-4b-v3
+    → Discard logit score < -5.0
+    → Keep Top 7 survivors
+    → Vector score threshold: 0.30
+```
+
+**Graph Path (Neo4j)**
+```cypher
+// extract_query_entities() → 3-8 keywords
+MATCH (n)-[r1]-(m)
+WHERE n.name IN $keywords
+OPTIONAL MATCH (m)-[r2]-(leaf)
+RETURN n.name, r1.type, m.name, r2.type, leaf.name
+LIMIT 50
+```
+Graph context is **prepended** to vector chunks as `--- RELEVANT GRAPH CONNECTIONS ---`, ensuring the LLM sees symbolic relationships first.
+
+</details>
+
+<details>
+<summary><strong>⚡ Node 4 — <code>generate_node</code>: LLM Generation</strong></summary>
+
+- Prunes context to `AGENT_MAX_CONTEXT_CHARS` (default: `60,000`) via flat character subtraction (`MAX_CHARS - 2000`)
+- Injects `audit_feedback` string on retries so the LLM knows exactly what to correct
+- For `math` intent: calls MathExecutor **before** the final LLM prompt assembly, injecting the verified result as ground truth
+
+**Provider fallback priority (auto-detect at startup)**:
+```
+NVIDIA → Groq → Gemini → OpenAI
+```
+
+</details>
+
+<details>
+<summary><strong>🛡️ Node 5 — <code>audit_node</code>: 3-Stage Validation</strong></summary>
+
+**Stage 1 — Regex Pre-Check**  
+Fast pattern matching for fabricated causal links (e.g., *"increased because of"*) or hallucinated arithmetic forms. Zero LLM cost.
+
+**Stage 2 — NetworkX Circular Dependency**  
+```python
+G = nx.DiGraph()
+# Parses extracted logical predicates into a directed graph
+# e.g., "A is defined by B" → G.add_edge("A", "B")
+is_valid = nx.is_directed_acyclic_graph(G)
+# Circular definitions (A → B → A) are caught and flagged
+```
+
+**Stage 3 — LLM Auditor**  
+Final pass checking date swaps (Q1 vs Q2), transposed figures, and hallucinated entity names. Returns structured `audit_feedback` that is injected into the next `generate_node` call if the answer fails.
+
+**On failure**: confidence halved, capped at 0.50, retry loop triggered once.
+
+</details>
+
+---
+
+## 🧮 Math Execution & OS-Level Sandboxing
+
+Standard LLMs hallucinate arithmetic. DocuMind intercepts all `math`-intent queries and computes the answer in Python instead:
+
+```python
+class MathExecutor:
+    def process_math_question(self, question: str, context: str) -> dict:
         
-        # 3. Dynamic Model Auto-Detection
-        # Pings the selected service (e.g., vLLM or Ollama) to bind to the 
-        # currently active model in memory automatically.
-        if provider_type == "vllm":
-             _llm_instance = VLLMProvider(...)
+        # Step 1 — Structured variable extraction via LLM
+        # Variables prefixed with source doc to cleanly handle conflicting evidence:
+        # { "report_a_q1_revenue": 50.2, "report_b_q1_revenue": 48.7 }
+        variables = self.extract_variables_from_context(context, question)
+
+        # Step 2 — LLM generates a clean Python calculation script
+        code = self.generate_calculation_code(question, variables, context)
+
+        # Step 3 — OS-level sandboxed subprocess execution
+        result = subprocess.run(
+            ["python3", temp_file],
+            capture_output=True,
+            timeout=5,
+            preexec_fn=self._set_resource_limits   # ← Linux-only security layer
+        )
+
+        return {"success": True, "answer": result.stdout.strip()}
+
+    def _set_resource_limits(self):
+        # Applied via Linux preexec_fn BEFORE the subprocess starts
+        resource.setrlimit(resource.RLIMIT_AS,  (256 * 1024 * 1024,) * 2)  # 256MB VM cap
+        resource.setrlimit(resource.RLIMIT_CPU, (10, 10))                   # 10s hard CPU cap
 ```
 
-**Prompt Engineering**:
-  - **System Templates**: Constraint-aware instructions + retrieved context formatting
-  - **Variable Injection**: `{question}`, `{context}`, `{constraints}` placeholders
-  - **Output Schemas**: JSON mode for structured extraction (entities, relationships, summaries)
+| Protection | Mechanism | Limit |
+|---|---|---|
+| Memory bomb prevention | `RLIMIT_AS` | 256 MB virtual memory |
+| Infinite loop prevention | `RLIMIT_CPU` | 10 seconds hard CPU time |
+| Process escape prevention | `subprocess.run` isolation | Separate temp file |
+| Timeout fallback | `subprocess timeout` | 5 seconds wall clock |
 
-**Function Calling / Tool Use**:
-  - **Math Execution**: Automatic detection → structured variable extraction (JSON) → code generation → sandboxed execution
-  - **Graph Queries**: Entity lookup → Cypher query construction → relationship traversal
-  - **Document Operations**: Upload → parse → chunk → embed → index pipeline
+---
 
-**Response Handling**:
-  - **Progress Tracking**: Celery task metadata with `{current_step, total_steps, status}` updates
+## 📊 Confidence Scoring & Penalties
 
-**Concurrency & Hardware Management**:
-  - **Cloud Mode (vLLM/OpenAI/Gemini)**: Utilizes `asyncio.Semaphore` for parallel chunk processing (5x concurrency) to maximize throughput without hitting API rate limits.
-  - **Local Mode (Ollama)**: Automatically falls back to strictly serial processing using a Redis distributed lock (`gpu_inference_lock`). This forces threads to wait their turn, guaranteeing 100% extraction coverage and completely preventing local GPU Out-Of-Memory (OOM) crashes.
+The confidence score is **not a raw probability** — it is an actively penalized heuristic that reflects the pipeline's execution path:
 
-#### **Knowledge Graph Intelligence**
-
-**Entity Extraction Pipeline**:
-  - **Temporally Grounded Extraction**: LLM-powered extraction forces numerical values to bind to their time periods (e.g., linking "$10M" specifically to "Q1 2024 Revenue").
-  - **Adversarial Revision Detection**: Explicitly hunts for document corrections and restatements, mapping them with specific predicates like `REVISED_TO` or `SUPERSEDES` to maintain chronological truth.
-  - **Hybrid Typing**: Uses LLM for entity extraction (finding the names) combined with Regex-based heuristics for rapid node classification (e.g., detecting "Inc." for Organizations, "Act" for Statutes).
-
-**Graph Schema**:
-```python
-class KnowledgeBase:
-    def _initialize_schema():
-        # Node types: Entity, Document, Chunk
-        # Relationship types: MENTIONS, DEFINES, CONTRADICTS, RELATES_TO, CONTAINS
-        # Indexes: Entity.name, Entity.type, Document.filename
+```
+Base Score
+    │  Highest NVIDIA Reranker logit score, capped at 0.95
+    │
+    ├── Contradiction found in source text?
+    │       → cap score at 0.75
+    │
+    └── audit_node rejected answer → retry triggered?
+            → score ×0.5, capped at 0.50
 ```
 
-**Traversal Patterns**:
-  - **1-Hop Neighbors**: Direct entity connections (e.g., "What companies does John work for?")
-  - **2-Hop Paths**: Indirect relationships (e.g., "What concepts connect AI to healthcare?")
-  - **3-Hop Subgraphs**: Multi-hop reasoning (e.g., "How is concept A related to concept C via B?")
-
-**Query Optimization**:
-  - **Parameterized Cypher**: `MATCH (e:Entity {name: $entity_name})-[r*1..3]-(connected)` with prepared statements
-  - **Result Limiting**: `LIMIT 100` to prevent graph explosion on dense documents
-  - **Entity Type Filtering**: `WHERE e.type IN $allowed_types` for targeted retrieval
-
-**Visualization Data Export**:
-  - **Native Cypher Export**: `get_visualization_data()` manually serializes graph structure into JSON for frontend rendering without heavy library dependencies.
-  - **Statistics API**: `get_graph_statistics()` computes entity counts, relationship distributions, centrality metrics
-
-#### **Document Intelligence Pipeline**
-
-**PDF Processing**:
-  - **Unstructured Partitioning**: `partition_pdf()` extracts text and infers table structures using the auto layout strategy
-  - **Smart Parsing**: `SmartPDFParser.parse_with_metadata()` detects headers, footers, page numbers
-
-**Multi-Format Support**:
-  - **PDF**: `partition_pdf()` via Unstructured library
-  - **DOCX**: `partition_docx()` preserves formatting and styles
-  - **TXT**: `partition_text()` with encoding detection
-
-**Metadata Extraction & Temporal Anchoring**:
-  - **Sticky Headers**: Actively tracks `Title` elements during parsing and forcefully injects the active header into downstream elements as a `section` metadata tag. This ensures isolated text chunks retain their hierarchical context (e.g., anchoring a paragraph to its "Q3 Financials" parent header).
-  - **Document Properties**: Automatically tracks the source filename and page numbers across all supported formats (`.pdf`, `.docx`, `.txt`).
-  - **Chunk-Level Tags**: Each chunk is normalized into a strict dictionary schema: `{source, page, chunk_id, type, section}`.
-
-**Chunking Strategies**:
-  - **Title-Based Semantic Splits**: `chunk_by_title()` creates semantically coherent segments bounded by document headers.
-  - **Character-Based Limits**: strictly configured for `max_characters=2000` with a soft-split boundary at 1800 characters to ensure chunks remain digestible for the LLM.
-  - **Small Text Aggregation**: Automatically combines orphaned text blocks under 500 characters to prevent context fragmentation.
-
-**Ingestion Workflow**:
-```python
-async def process_document(self, file_path, filename, cancellation_token):
-    # 1. Parse document with Smart Layout Awareness
-    chunks = self.parser.parse_with_metadata(file_path)
-    
-    # 2. Dynamic Concurrency Control (Semaphore for Cloud)
-    semaphore = asyncio.Semaphore(self.concurrency)
-    
-    async def process_chunk_safe(i, chunk):
-        async with semaphore:
-            if cancellation_token(): return
-            
-            # 3. Embed & Vector Store (Qdrant handles embeddings internally)
-            self.vector_db.add_documents([chunk["text"]], [chunk["metadata"]], filename)
-            
-            # 4. LLM Graph Extraction (with Redis Lock for Local GPU protection)
-            if self.is_cloud:
-                relations = await asyncio.to_thread(self.agent.extract_relationships, chunk["text"])
-            else:
-                # Blocks indefinitely until GPU is free
-                if r_lock.acquire(blocking=True): 
-                    try:
-                        relations = await asyncio.to_thread(self.agent.extract_relationships, chunk["text"])
-                    finally:
-                        r_lock.release()
-                        
-            # 5. Persist to Knowledge Graph (Neo4j)
-            if relations:
-                self.kb.add_relations(relations, source_file=filename)
-
-    # Launch async tasks concurrently
-    await asyncio.gather(*[process_chunk_safe(i, c) for i, c in enumerate(chunks)])
-```
-
-### System Architecture (Backend Focus)
-
-#### **FastAPI REST API**
-
-**Endpoint Design**:
-  - `POST /upload`: Async document upload → Celery task dispatch → task_id return
-  - `GET /status/{task_id}`: Polling endpoint for ingestion progress (Redis-backed state)
-  - `POST /query`: RAG query execution with `{question, context_depth}` payload
-  - `GET /graph`: Knowledge graph visualization data (NetworkX JSON export)
-  - `POST /summarize/{filename}`: Deterministic summary generation using Qdrant Scroll and a 'Bookend Strategy' (Intro + Body + Outro sampling)`
-
-**Request/Response Patterns**:
-```python
-class QueryRequest(BaseModel):
-    question: str
-    history: Optional[List[Dict[str, str]]] = []
-    selected_docs: Optional[List[str]] = []
-
-class QueryResponse(BaseModel):
-    answer: str
-    context_used: List[str]
-    confidence: float
-    model: str
-```
-
-**CORS Configuration**:
-  - **Allowed Origins**: \["*"]` (Open CORS for development/testing)`
-  - **Methods**: GET, POST, DELETE, OPTIONS
-  - **Headers**: \["*"]` (All headers allowed)`
-
-#### **Database Strategies**
-
-**Redis (State Management)**:
-  - **Filename-Mapped Tracking**: Custom state manager links Celery `task_id` directly to the `filename` (`documind:file_status:{filename}`) for easy UI polling.
-  - **Pipeline Status**: Stores the active state (`processing`, `completed`, `failed`, `cancelled`) along with `uploaded_at` and `completed_at` UTC timestamps.
-  - **Error Logging**: Captures and persists exception strings if ingestion fails.
-  - **TTL Policies**: Task metadata automatically expires after 24 hours to prevent memory bloat.
-
-**Qdrant (Vector Store)**:
-  - **Unified Collection Strategy**: Uses a single `documind_docs` collection for scalable storage, preventing the overhead of managing thousands of individual collections.
-  - **Dynamic Payload Filtering**: Achieves strict cross-document isolation during search and deletion by applying Qdrant `FieldCondition` filters against the embedded `"source"` payload metadata.
-  - **Persistent Storage**: On-disk indices survive container restarts via Docker volumes.
-
-**Neo4j (Knowledge Graph)**:
-  - **ACID Transactions**: Relationship creation wrapped in `neo4j.Session` contexts
-  - **Schema Constraints**: Unique entity names, required type fields
-  - **Backup Strategy**: Periodic `neo4j-admin dump` for disaster recovery
-
-#### **Caching Mechanisms**
-
-**Caching Mechanisms**:
-  - **Embedding Cache**: In-memory caching during ingestion processing
-  - *(Note: Persistent caching is handled via Qdrant storage)*
-
-#### **Background Job Processing**
-
-**Celery Task Queue**:
-  - **Broker**: Redis at `redis://localhost:6379/0`
-  - **Worker Pool**: Prefork with 4 concurrent workers
-  - **Task Routing**: Uses the default Celery queue configuration to manage distributed document ingestion via the `documind_tasks` app.
-
-**Progress Reporting**:
-```python
-@celery_app.task(bind=True, name="ingest_document")
-def ingest_document_task(self, file_path: str, filename: str):
-    # 1. State Tracking + Cooperative Cancellation
-    self.update_state(state='PROCESSING', meta={'status': 'Waiting for GPU...'})
-    state_manager.set_processing(filename, self.request.id)
-
-    def check_if_cancelled():
-        return state_manager.get_status(filename).get("status") == "cancelled"
-
-    # 2. Distributed GPU Lock with Queueing
-    gpu_lock = redis_client.lock("documind_gpu_lock", timeout=1800, blocking=True, blocking_timeout=600)
-
-    try:
-        acquired = gpu_lock.acquire()
-        if not acquired: raise RuntimeError("GPU lock acquisition timed out.")
-
-        # 3. Heavy Instantiation ONLY after securing resources
-        ingestor = DocuMindIngest()
-        asyncio.run(ingestor.process_document(file_path, filename, check_if_cancelled))
-
-        # 4. Success State Sync
-        state_manager.set_completed(filename)
-        self.update_state(state='SUCCESS')
-
-    except asyncio.CancelledError:
-        state_manager.set_cancelled(filename)
-        self.update_state(state='REVOKED')
-        raise Ignore()
-
-    finally:
-        # 5. Crash-Safe Lock Release
-        if gpu_lock.locked() and gpu_lock.owned():
-            gpu_lock.release()
-```
-
-**Crash-Safe Resource Management**:
-  - **Distributed GPU Queueing & Locking**: Uses Redis locks with a strict execution timeout (timeout=1800s) and a graceful worker queueing mechanism (blocking_timeout=600s) to prevent OOM crashes without dropping incoming tasks.
-  - **Lazy Instantiation**: Heavy ingestion classes are only loaded into memory *after* the hardware lock is successfully acquired.
-  - **Guaranteed Release**: A strict `finally` block ensures `gpu_lock.release()` is executed even if a document fails, preventing permanent pipeline deadlocks.
-  - **Cooperative Cancellation**: Background workers periodically poll a `check_if_cancelled()` token, allowing users to abort stuck jobs gracefully without having to kill the worker process.
-
-**Error Handling**:
-  - **Late Acknowledgments**: Configured globally (`task_acks_late=True`) to ensure zero data loss if a worker crashes during heavy PDF processing; tasks are only acknowledged upon successful completion.
-  - **State Persistence**: Failed and processing tasks store their metadata in Redis for debugging and UI polling.
-  - **Cancellation Support**: Cooperative cancellation triggers graceful cleanup via Redis state management.
-
-### User Interface (Integration Layer)
-
-**Frontend Stack**: React 19 + Vite serves as a lightweight UI layer for AI system interaction via REST API
-
-**Key Integrations**:
-  - **Polling Mechanism**: 2-second intervals for task status updates (`usePolling` hook)
-  - **Graph Visualization**: `react-force-graph-2d` renders Neo4j data from `/graph` endpoint
-  - **PDF Preview**: `react-pdf` displays source documents alongside citations
+| Scenario | Final Score |
+|---|---|
+| Clean retrieval, first-pass audit passes | Up to `0.95` |
+| Source text contains "Revised to..." / contradictions | Capped at `0.75` |
+| Audit fails, retry required | Halved → capped at `0.50` |
 
 ---
 
 ## 🛠️ Technology Stack
 
-| Layer | Technology |
-|-------|-----------|
-| **LLM Providers** | Ollama (Llama 3, Mistral), vLLM (optimized serving), OpenAI (GPT-4, GPT-3.5), Gemini Pro |
-| **Embeddings** | sentence-transformers (all-MiniLM-L6-v2, 384-dim) |
-| **Vector Store** | Qdrant (HNSW indexing, cosine similarity) |
-| **Graph Database** | Neo4j 5.x (Cypher queries, APOC procedures) |
-| **Agent Framework** | LangGraph (state machines, conditional routing) |
-| **Backend Framework** | FastAPI 0.109+ (async endpoints, Pydantic validation) |
-| **Task Queue** | Celery 5.x with Redis broker |
-| **State Management** | Redis 7.x (task metadata, conversation history) |
-| **Document Processing** | Unstructured (PDF/DOCX parsing) |
-| **Graph Algorithms** | Native Cypher (traversal, aggregation) |
-| **Evaluation** | RAGAS (faithfulness, context precision, answer relevance) |
-| **Observability** | LangSmith (@traceable decorators, trace export) |
-| **Math Execution** | Sandboxed Python subprocess (Standard Library) |
-| **Frontend (UI Only)** | React 19 + Vite + Tailwind + Radix UI + Framer Motion |
-| **DevOps** | Docker (containerization), docker-compose (multi-service orchestration) |
+### LLM Providers
+
+| Role | Provider | Default Model |
+|---|---|---|
+| **Primary — Reasoning** | NVIDIA NIM | `nvidia/llama-3.3-nemotron-super-49b-v1.5` |
+| **Primary — Fallback 1** | Groq | `qwen/qwen3-32b` |
+| **Primary — Fallback 2** | Google Gemini | `gemini-2.5-flash` |
+| **Primary — Fallback 3** | OpenAI | `gpt-4o` |
+| **Primary — Fallback 4** | Anthropic | `claude-sonnet-4-6` |
+| **Structured (Graph NER)** | Groq via `STRUCTURED_LLM_PROVIDER` | `qwen/qwen2.5-coder-32b-instruct` |
+
+> The system uses a **dual-model architecture**: the primary provider handles open-ended reasoning and generation; the structured provider is optimized specifically for JSON graph entity extraction and coreference disambiguation.
+
+### Core Libraries
+
+| Layer | Technology | Role |
+|---|---|---|
+| **Orchestration** | LangGraph | 5-node state machine |
+| **PDF Parsing** | LlamaParse (`llama-cloud`) | High-fidelity Markdown conversion |
+| **Semantic Chunking** | Chonkie + `BAAI/bge-small-en-v1.5` | 512-token semantic splits |
+| **Embeddings** | NVIDIA `nv-embedqa-mistral-7b-v2` | 4096-dim vectors |
+| **Reranking** | NVIDIA `nv-rerankqa-mistral-4b-v3` | Logit-scored Top-7 selection |
+| **Deduplication** | RapidFuzz `token_sort_ratio` | Entity coreference resolution |
+| **Graph Analysis** | NetworkX `DiGraph` | Circular dependency detection |
+| **Object Storage** | MinIO (boto3) | S3-compatible raw file storage |
+| **Evaluation** | RAGAS | Faithfulness · answer relevancy |
+| **Tracing** | LangSmith | `@traceable` decorators |
 
 ---
 
-## 📦 Installation
+## 🚢 Kubernetes Deployment
 
 ### Prerequisites
 
-- **Python**: `3.10+` (required for LangGraph, FastAPI)
-- **Neo4j**: `5.x` (knowledge graph backend)
-- **Qdrant**: `1.7+` (vector database)
-- **Redis**: `7.x` (Celery broker, state storage)
-- **Docker**: `24.x` (optional, for containerized deployment)
-- **Node.js**: `18+` (only for frontend UI)
+```bash
+# 1. Install tools
+kubectl · helm · minikube (or EKS/GKE)
 
-### Environment Variables
+# 2. Enable NGINX Ingress
+minikube addons enable ingress
 
-Create a `.env` file in the project root:
+# 3. Add local DNS
+echo "127.0.0.1 documind.local" | sudo tee -a /etc/hosts
+```
+
+### Deploy
 
 ```bash
-# LLM Provider Configuration
-OPENAI_API_KEY=sk-proj-...                     # OpenAI API key
-GOOGLE_API_KEY=AIza...                         # Gemini API key
-OLLAMA_BASE_URL=http://localhost:11434         # Ollama server
-VLLM_BASE_URL=http://localhost:8000/v1         # vLLM server
+# Sync API key secrets from backend/.env
+make secrets
+make minio-secret
 
-# Vector Store Configuration
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-QDRANT_API_KEY=                                # Leave empty for local deployment
+# Apply all K8s manifests (StatefulSets, Deployments, Ingress, PVCs)
+make setup
 
-# Knowledge Graph Configuration
-NEO4J_URI=bolt://neo4j:7687                # Service name in Docker
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=your_neo4j_password             # Set during Neo4j installation
-
-# Redis Configuration
-REDIS_URL=redis://localhost:6379/0
-
-# Application Settings
-UPLOAD_FOLDER=./uploads
-EMBEDDING_MODEL=all-MiniLM-L6-v2               # sentence-transformers model
-CHUNK_SIZE=512                                  # Document chunking token limit
-CHUNK_OVERLAP=50                                # Overlap between chunks
-
-# LangSmith Tracing (Optional)
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_API_KEY=ls__...                       # LangSmith API key
-LANGCHAIN_PROJECT=documind-rag
-LANGCHAIN_ENDPOINT="https://api.smith.langchain.com"
+# Open http://documind.local
 ```
 
-### Setup Steps
+### Cluster Resources
 
-```bash
-# 1. Clone the repository
-git clone https://github.com/yourusername/documind-ai.git
-cd documind-ai
+| Resource | Type | Replicas | CPU Limit | RAM Limit | Storage |
+|---|---|---|---|---|---|
+| `fastapi` | Deployment | 2 | 1000m | 2Gi | — |
+| `worker` | Deployment | 1 | — | — | — |
+| `qdrant` | StatefulSet | 1 | — | — | PVC |
+| `neo4j` | StatefulSet | 1 | — | 512MB JVM | PVC |
+| `minio` | StatefulSet | 1 | — | — | PVC |
+| `redis` | Deployment | 1 | — | — | — |
 
-# 2. Backend Setup (Primary AI/ML Components)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r backend/requirements.txt
+### Ingress Routing
 
-# 3. Start Infrastructure Services
-# Neo4j (Knowledge Graph)
-docker run -d \
-  --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/your_neo4j_password \
-  neo4j:5.15
-
-# Qdrant (Vector Store)
-docker run -d \
-  --name qdrant \
-  -p 6333:6333 \
-  qdrant/qdrant:v1.7.4
-
-# Redis (Task Queue + State)
-docker run -d \
-  --name redis \
-  -p 6379:6379 \
-  redis:7-alpine
-
-# 4. Initialize AI Systems
-# Download embedding model (sentence-transformers)
-python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
-
-# Initialize Neo4j schema
-python backend/knowledge_graph.py
-
-# 5. Frontend Setup (Optional UI Layer)
-cd frontend && npm install  # Install React dependencies
-
-# 6. Start Celery Worker (Background Jobs)
-celery -A backend.celery_app worker --loglevel=info
-
-# 7. Start FastAPI Backend
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
-# → AI Engine runs on http://127.0.0.1:8000
-
-# 8. Start Frontend (Optional)
-npm run dev  # UI on http://localhost:5173
+```yaml
+# NGINX Ingress with path rewriting
+# documind.local/api/* → fastapi-service:8000/*
+annotations:
+  nginx.ingress.kubernetes.io/rewrite-target: /$2
 ```
 
-**Verify Installation**:
-```bash
+### Health Probes
 
-# Check Neo4j connection
-curl http://localhost:7474  # Neo4j Browser UI
+The `/health` endpoint executes live dependency checks — not just a static `200 OK`:
 
-# Check Qdrant status
-curl http://localhost:6333/collections
-```
-
----
-
-## 🚀 Usage
-
-### Starting the Application
-
-```bash
-# Terminal 1: Start FastAPI Backend
-cd backend
-uvicorn main:app --reload
-# → AI Engine runs on http://127.0.0.1:8000
-
-# Terminal 2: Start Celery Worker
-celery -A celery_app worker --loglevel=info
-# → Background job processor for document ingestion
-
-# Terminal 3: Start Frontend (Optional)
-cd frontend && npm run dev
-# → UI on http://localhost:3000
-```
-
-### API Endpoints (AI-Focused)
-
-#### **Document Ingestion**
-```bash
-# Upload and process a PDF
-curl -X POST http://localhost:8000/upload \
-  -F "file=@research_paper.pdf"
-# Response: {"task_id": "abc-123", "status": "PROCESSING"}
-
-# Check ingestion progress
-curl http://localhost:8000/status/abc-123
-# Response: {"state": "PROCESSING", "meta": {"current": 3, "total": 5, "status": "Embedding chunks"}}
-
-# List all documents and their current ingestion status
-curl http://localhost:8000/documents
-
-# Cancel an ongoing Celery ingestion job gracefully
-curl -X POST http://localhost:8000/cancel/research_paper.pdf
-
-# Delete a document entirely from vector DB, graph DB, and disk
-curl -X DELETE http://localhost:8000/delete/research_paper.pdf
-```
-
-#### **RAG Query Execution**
-```bash
-# Query the knowledge base
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "What are the key findings about neural architecture search?",
-    "history": [],
-    "selected_docs": []
-  }'
-
-# Response:
-{
-  "answer": "The document identifies three key findings...",
-  "context_used": [
-    "DARTS (Differentiable Architecture Search) reduces search cost from..."
-  ],
-  "confidence": 1.0,
-  "model": "DocuMind-Agent-v2"
-}
-```
-
-#### **Knowledge Graph Exploration**
-```bash
-# Get graph visualization data
-curl http://localhost:8000/graph
-
-# Response: NetworkX-serialized graph with all entities + relationships
-{
-  "nodes": [
-    {"id": "DARTS", "group": "Entity"},
-    {"id": "Neural_Architecture_Search", "group": "Concept"}
-  ],
-  "links": [
-    {"source": "DARTS", "target": "Neural_Architecture_Search", "label": "RELATES_TO"}
-  ]
-}
-```
-
-#### **Document Summarization**
-```bash
-# Generate executive summary
-curl -X POST http://localhost:8000/summarize/research_paper.pdf
-
-# Response:
-{
-  "summary": "1. **Executive Overview**: This paper introduces DARTS...\n2. **Key Financials/Facts**: Reduces search cost...\n3. **Strategic Highlights**: Achieves SOTA on CIFAR-10..."
-}
-
-#### **System Dashboard**
-```bash
-# Get system health and stats
-curl http://localhost:8000/dashboard
-
-# Response:
-{
-  "tasks": {"processed": 10, "failed": 0},
-  "graph": {"nodes": 500, "edges": 1200},
-  "vectors": {"count": 1500}
-}
-```
-```
-
----
-
-## 🗂️ Project Structure
-
-```
-documind-ai/
-├── backend/                          # AI/ML Backend (MAIN FOCUS)
-│   ├── main.py                       # FastAPI app with API routes
-│   ├── agent_graph.py                # LangGraph multi-agent pipeline
-│   │   ├── decompose_query_node()    # Query decomposition + entity extraction
-│   │   ├── retrieve_node()           # Hybrid vector + graph retrieval
-│   │   ├── generate_node()           # LLM generation with context injection
-│   │   ├── audit_node()              # Fabrication detection + source verification
-│   │   └── decide_next_step()        # Conditional routing (retry/end)
-│   ├── graph_agent.py                # Graph-based retrieval agent
-│   ├── llm_provider.py               # Multi-provider LLM abstraction
-│   │   ├── OllamaProvider            # Local Ollama integration
-│   │   ├── VLLMProvider              # Optimized vLLM serving
-│   │   ├── OpenAIProvider            # GPT-4/3.5 integration
-│   │   └── GeminiProvider            # Google Gemini Pro
-│   ├── vector_store.py               # Qdrant vector database client
-│   │   ├── add_documents()           # Batch embedding + indexing
-│   │   └── search()                  # Top-K similarity search
-│   ├── knowledge_graph.py            # Neo4j knowledge graph manager
-│   │   ├── KnowledgeBase             # Graph operations wrapper
-│   │   ├── add_relations()           # Entity + relationship insertion
-│   │   ├── query_subgraph()          # Cypher-based graph traversal
-│   │   └── get_visualization_data()  # NetworkX export for UI
-│   ├── ingest.py                     # Document processing pipeline
-│   │   └── DocuMindIngest            # Chunking, embedding, graph extraction
-│   ├── parser.py                     # Multi-format document parsing
-│   │   ├── SmartPDFParser            # Metadata-aware PDF extraction
-│   │   ├── partition_pdf()           # Unstructured PDF processing
-│   │   ├── partition_docx()          # DOCX support
-│   │   └── chunk_by_title()          # Semantic chunking
-│   ├── constraint_checker.py         # LLM output validation
-│   │   ├── extract_predicates()      # Parse logical constraints
-│   │   ├── check_consistency()       # Circular dependency detection
-│   │   └── validate_answer()         # Ensure answer matches constraints
-│   ├── code_executor.py              # Safe Python execution for math
-│   │   ├── MathExecutor              # Sandboxed code runner
-│   │   ├── needs_math()              # Detect quantitative questions
-│   │   ├── generate_calculation_code() # LLM-generated Python code
-│   │   └── execute_code_safely()     # Subprocess with timeout
-│   ├── dashboard_stats.py            # Aggregates system metrics
-│   ├── evaluate_ragas.py             # RAGAS evaluation suite
-│   │   ├── run_test_suite()          # Faithfulness, answer relevancy
-│   │   └── get_dynamic_judge()       # LLM-as-a-judge for metrics
-│   ├── celery_app.py                 # Celery task queue configuration
-│   ├── tasks.py                      # Background job definitions
-│   │   └── ingest_document_task()    # Async document processing
-│   ├── state_manager.py              # Redis-backed task state
-│   │   ├── set_processing()          # Init task with 24h TTL
-│   │   ├── get_all_statuses()        # Dashboard monitoring
-│   │   ├── set_cancelled()           # Cooperative cancellation state
-│   │   ├── delete_task()             # cleanup state
-│   │   ├── get_status()              # Query task state
-│   │   └── set_failed()              # Error handling
-│   └── requirements.txt              # Python dependencies
-├── frontend/                         # React 19 UI
-│   ├── src/pages/DashboardPage.jsx   # System status overview
-│   ├── src/pages/GraphPage.jsx       # 2D Graph explorer
-│   ├── src/pages/SummaryPage.jsx     # Document summarizer
-│   └── src/components/               # Radix UI + Tailwind components
-├── data/                             # Runtime data storage
-│   ├── uploads/                      # Uploaded documents
-│   ├── embeddings/                   # Cached sentence-transformers vectors
-│   └── graphs/                       # Exported NetworkX graphs
-├── docker-compose.yml                # Multi-service orchestration (Neo4j, Qdrant, Redis)
-├── Dockerfile                        # Backend containerization
-└── .env                              # Environment configuration
-```
-
----
-
-## 🎯 AI Engineering Highlights
-
-### RAG Performance
-
-**Response Latency**:
-  - **Simple Factoid Questions**: <300ms (single-hop vector search + LLM call)
-  - **Complex Multi-Hop Queries**: 600-900ms (graph traversal + context assembly + generation)
-  - **Document Ingestion**: 2-5 seconds per PDF page (parsing + embedding + graph extraction)
-
-**Hallucination Mitigation**:
-  - **Baseline RAG**: 12-18% fabrication rate on adversarial questions (no guardrails)
-  - **DocuMind + Constraints**: 4-7% fabrication rate (constraint checking + audit node)
-  - **DocuMind + Graph**: 2-5% fabrication rate (graph grounding reduces unsupported claims)
-
-### LLM Integration Patterns
-
-**Prompt Engineering Techniques**:
 ```python
-# Priority-Based Instruction System
-system_prompt = f"""You are DocuMind. 
-
-INSTRUCTION PRIORITY (highest to lowest):
-1. 🔒 VERIFIED CALCULATIONS: If [SYSTEM NOTE: TRUSTED CODE EXECUTION RESULT] is present, you MUST use that exact value.
-2. 🔄 AUDIT CORRECTIONS: Fix errors flagged by the previous audit step.
-3. ⚠️ GRAPH OVERRIDES: Knowledge Graph relationships (e.g., "REVISED_TO") take precedence over vector text.
-4. 📄 DOCUMENT EVIDENCE: Use context for all other facts.
-"""
-
-# Few-Shot Example Selection (Dynamic)
-similar_examples = find_similar_queries(query, example_bank, top_k=3)
-prompt = f"{system_prompt}\n\nEXAMPLES:\n{format_examples(similar_examples)}\n\nQUESTION: {query}"
+# Liveness probe runs actual connectivity checks
+checks = {
+    "redis":  redis_client.ping(),            # redis-cli ping
+    "qdrant": client.get_collections(),       # Qdrant collections API
+    "neo4j":  driver.verify_connectivity(),   # Bolt protocol handshake
+}
+# Returns 200 if all healthy, 503 with degraded service details if not
 ```
-
-**Context Optimization**:
-  - **Token Counting**: Pre-flight validation ensures context fits within model limits
-  - **Chunk Ranking**: BM25 + semantic similarity hybrid scoring prioritizes best chunks
-  - **Dynamic Answer Resizing**: If input context is extremely dense, the provider automatically shrinks the requested output token budget (down to a minimum of 200 tokens) to guarantee a complete, untruncated response.
-
-**Error Handling Strategies**:
-```python
-@retry(max_attempts=3, backoff_factor=2.0)
-def generate_with_guardrails(prompt, constraints):
-    for attempt in range(3):
-        response = llm.generate(prompt, temperature=0.3 + 0.2*attempt)
-        
-        if validate_scope_integrity(response, context):
-            if check_constraints(response, constraints):
-                return response
-            else:
-                prompt += f"\nPrevious answer violated constraints. Please retry."
-        else:
-            prompt += f"\nAnswer contained unsupported claims. Stick to the context."
-    
-    return "Unable to generate valid answer after 3 attempts."
-```
-
-### Knowledge Graph Capabilities
-
-**Entity Extraction Accuracy** (Manual Annotation Benchmark):
-  - **Precision**: 0.91 (91% of extracted entities are correct)
-  - **Recall**: 0.84 (84% of ground truth entities successfully extracted)
-  - **F1 Score**: 0.875
-
-**Relationship Inference**:
-  - **Direct Relationships**: Extracted from co-occurrence within 2-sentence windows
-  - **Implicit Relationships**: LLM infers DEFINES, CONTRADICTS, EVALUATES from context
-  - **Confidence Calibration**: Relationships below 0.6 confidence threshold are filtered
-
-**Traversal Patterns**:
-  - **Standard 1-Hop**: Retrieves direct, non-adversarial connections to the query keywords, ordered by corroboration strength (HIGH -> LOW).
-  - **Adversarial Look-Ahead (2nd-Hop)**: Executes an `OPTIONAL MATCH` to hunt for leaf nodes connected via `CONTRADICTS`, `REVISES`, `SUPERSEDES`, or `NEGATES`. If found, it appends a structural warning (e.g., `[ALSO_SEE: REVISES] -> (ALTERNATIVE_VALUE)`) to the context string, ensuring the LLM sees both the original fact and its subsequent correction.
-
-```cypher
-// 1. Standard 1-Hop Traversal (EXCLUDING ADVERSARIAL EDGES)
-MATCH (n)-[r1:RELATION]-(m)
-WHERE NOT r1.type IN ['CONTRADICTS', 'REVISES', 'SUPERSEDES', 'NEGATES']
-
-// 2. Bidirectional Adversarial Look-Ahead
-OPTIONAL MATCH (m)-[r2:RELATION]-(leaf)
-WHERE r2.type IN ['CONTRADICTS', 'REVISES', 'SUPERSEDES', 'NEGATES']
-
-RETURN n.name, r1.type, m.name, r1.corroboration_strength, r2.type, leaf.name
-ORDER BY r1.corroboration_strength
-
-**Graph Statistics** (Example Document Corpus):
-  - **Nodes**: 2,847 entities across 15 documents
-  - **Edges**: 6,234 relationships (avg 2.19 edges per node)
-  - **Largest Connected Component**: 1,923 nodes (67% of graph)
-  - **Average Path Length**: 3.4 hops between random entity pairs
-  - **Clustering Coefficient**: 0.62 (high local connectivity, good for contextual retrieval)
 
 ---
 
-## 🧪 Evaluation & Testing
+## 🔌 API Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/upload` | Upload document → MinIO → dispatch Celery task → return `task_id` |
+| `GET` | `/status/{task_id}` | Poll ingestion progress (Redis-backed state) |
+| `POST` | `/query` | Execute full 5-node LangGraph pipeline |
+| `POST` | `/summarize/{filename}` | Full RAG pipeline with fabrication detection (not a simple scroll) |
+| `GET` | `/graph` | Knowledge graph visualization data (NetworkX JSON) |
+| `GET` | `/uploads/{filename}` | FastAPI proxy to MinIO object storage |
+| `GET` | `/health` | Live dependency health check (K8s probe target) |
+
+```python
+# Query request / response schema
+class QueryRequest(BaseModel):
+    question: str
+    history:      Optional[List[Dict[str, str]]] = []
+    selected_docs: Optional[List[str]]           = []
+
+class QueryResponse(BaseModel):
+    answer:       str
+    context_used: List[str]
+    confidence:   float          # Penalized score — see Confidence Scoring
+    model:        str
+```
+
+---
+
+## 🧪 Evaluation
 
 ### RAGAS Test Suite
 
-Run the automated evaluation pipeline:
-
 ```bash
-# Execute RAGAS metrics on test dataset
+# Run automated evaluation pipeline
 python backend/evaluate_ragas.py
 
-# Output: ragas_report.csv with metrics per query
-# Columns: question, answer, contexts, ground_truth, faithfulness, answer_relevancy
+# Outputs: ragas_report.csv
+# Columns: question · answer · contexts · ground_truth · faithfulness · answer_relevancy
 ```
 
-**Evaluation Dataset**:
-  - **Targeted Document Testing**: Uses a modular, hardcoded dictionary (`test_data`) to evaluate specific uploaded files (e.g., `r1.txt`).
-  - **Metrics Focus**: strictly evaluates generated answers against ground truth for `faithfulness` (no hallucinations) and `answer_relevancy` (directly addressing the prompt).
+The RAGAS pipeline uses a **dynamic judge model** that pings available endpoints at runtime:
 
-**Judge Model Pipeline**:
-  - **Dynamic Auto-Detection**: `get_dynamic_judge()` actively pings the `/models` endpoint to automatically bind to the correct model ID.
-  - **Primary**: Cloud tunnel (vLLM/OpenAI compatible) on port 8001.
-  - **Fallback**: Local Ollama (`qwen2.5:7b`) on port 11434 if the cloud tunnel is offline.
-  - **Embeddings**: `nomic-embed-text` via Ollama for metric similarity scoring.
+| Priority | Provider | Endpoint |
+|---|---|---|
+| Primary | Cloud API (OpenAI-compatible) | Port `8001` |
+| Fallback | Ollama `qwen2.5:7b` | Port `11434` |
+| Embeddings | `nomic-embed-text` via Ollama | Metric similarity scoring |
 
-### Manual Testing Examples
+### CI/CD Pipelines (GitHub Actions)
+
+| Workflow | Trigger | Steps |
+|---|---|---|
+| `backend-ci.yml` | Push to `backend/` | `flake8` lint → `pytest` suite |
+| `frontend-ci.yml` | Push to `frontend/` | `npm ci` → `npm run lint` → `npm run build` (Node 18) |
+| `docker-build.yml` | Push to main | Docker Buildx → build + package backend + frontend images |
+
+### Manual Test Examples
 
 ```bash
-# Test fabrication detection
-curl -X POST http://localhost:8000/query \
+# Test fabrication resistance (document doesn't mention this topic)
+curl -X POST http://documind.local/api/query \
+  -H "Content-Type: application/json" \
   -d '{"question": "What does the document say about quantum entanglement?"}'
-# Expected: "Information not found in documents" (if no quantum physics papers uploaded)
+# Expected: "Information not found in provided documents"
 
-# Test constraint validation
-curl -X POST http://localhost:8000/query \
-  -d '{"question": "Give me the top 5 machine learning frameworks by popularity"}'
-# Expected: Answer respects "top 5" constraint, provides ranked list
+# Test math sandboxing
+curl -X POST http://documind.local/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is the net revenue change from Q1 to Q2?"}'
+# Expected: Exact calculated figure with Python execution trace, not an LLM estimate
 
-# Test math execution
-curl -X POST http://localhost:8000/query \
-  -d '{"question": "If the model achieves 95% accuracy on 10,000 test samples, how many errors did it make?"}'
-# Expected: "The model made 500 errors (5% of 10,000)" with code execution trace
+# Test audit retry mechanism
+curl -X POST http://documind.local/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "List all risk factors mentioned across all sections"}'
+# Expected: synthesis path → ≥3 sub-queries → confidence score reflects audit path
 ```
 
 ---
 
-## 📄 License
+## 🔬 Deep Dives
 
-MIT License - see [LICENSE](LICENSE) file for details
+<details>
+<summary><strong>RapidFuzz Coreference Resolution — How entity deduplication works</strong></summary>
+
+Before any entity is written to Neo4j, it is compared against all existing nodes using `rapidfuzz.fuzz.token_sort_ratio`:
+
+```python
+for existing_entity in neo4j_entities:
+    score = fuzz.token_sort_ratio(new_entity, existing_entity)
+    
+    if score > 85:
+        # High-confidence match — auto-merge, point to existing node
+        merge_into(existing_entity)
+        
+    elif 60 <= score <= 84:
+        # Ambiguous — send both candidates to the structured LLM for disambiguation
+        resolved = llm_disambiguate(new_entity, existing_entity, context)
+        merge_into(resolved)
+        
+    else:
+        # New entity — create fresh node
+        neo4j.create_node(new_entity)
+```
+
+This prevents the graph from fragmenting into near-duplicate nodes (e.g., *"Apple Inc."* vs *"Apple"* vs *"Apple, Inc."*) that would silently cripple traversal quality.
+
+</details>
+
+<details>
+<summary><strong>NetworkX Constraint Checker — How circular logic is detected</strong></summary>
+
+```python
+class ConstraintChecker:
+    def check_circular_dependencies(self, predicates: List[str]) -> bool:
+        G = nx.DiGraph()
+        
+        # Parse predicates into directed edges
+        # e.g., "ratio = transactions / records" → G.add_edge("ratio", "transactions")
+        #        "transactions = ratio * records" → G.add_edge("transactions", "ratio")  ← cycle!
+        for predicate in predicates:
+            subject, dependency = self._extract_definition(predicate)
+            if subject and dependency:
+                G.add_edge(subject, dependency)
+        
+        # nx.is_directed_acyclic_graph returns False if any cycle exists
+        if not nx.is_directed_acyclic_graph(G):
+            return False  # Circular dependency detected → audit_node flags answer
+        return True
+```
+
+This catches subtle logical traps where an LLM defines X in terms of Y and Y in terms of X, making any numerical answer built on those definitions provably invalid.
+
+</details>
+
+<details>
+<summary><strong>Qdrant Payload Schema — What's stored per chunk</strong></summary>
+
+```json
+{
+  "text":             "The Q2 revenue was revised to $48.7M...",
+  "source":           "annual_report_2024.pdf",
+  "page":             12,
+  "chunk_id":         "annual_report_2024_pdf_chunk_047",
+  "section":          "Q2 Financial Results",
+  "type":             "NarrativeText",
+  "period":           "Q2-2024",
+  "table_html":       null,
+  "is_authoritative": false
+}
+```
+
+Tables extracted by LlamaParse set `is_authoritative: true` and are never split by the Chonkie chunker, preserving their structural integrity as atomic units.
+
+</details>
+
+<details>
+<summary><strong>Disk-Based Parse Cache — How redundant LlamaParse calls are avoided</strong></summary>
+
+```python
+# Parsing results are cached to disk, not in memory
+cache_key = hashlib.sha256(file_bytes).hexdigest()
+cache_path = f"/tmp/documind_parse_cache/{cache_key}.json"
+
+if os.path.exists(cache_path):
+    return json.load(open(cache_path))  # Cache hit — skip LlamaParse API call
+
+result = llamaparse_client.parse(file_bytes)
+json.dump(result, open(cache_path, "w"))  # Persist for future ingestion runs
+return result
+```
+
+The SHA-256 hash of the raw file bytes is used as the cache key, meaning identical file content always hits the cache regardless of filename.
+
+</details>
+
+---
+
+## 🚀 Quick Start (Docker Compose)
+
+```bash
+# Clone
+git clone https://github.com/yourusername/documind-ai.git
+cd documind-ai
+
+# Configure environment
+cp backend/.env.example backend/.env
+# Add: NVIDIA_API_KEY, LLAMA_CLOUD_API_KEY, MINIO_ACCESS_KEY, MINIO_SECRET_KEY
+
+# Launch all services
+docker compose up -d
+
+# Frontend → http://localhost:3000
+# API docs  → http://localhost:8000/docs
+```
+
+**Required API Keys:**
+
+| Key | Service | Purpose |
+|---|---|---|
+| `NVIDIA_API_KEY` | NVIDIA NIM | LLM · Embeddings · Reranker |
+| `LLAMA_CLOUD_API_KEY` | LlamaParse | PDF parsing |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO | Object storage |
+| `GROQ_API_KEY` *(optional)* | Groq | Fallback LLM + structured extraction |
+| `ANTHROPIC_API_KEY` *(optional)* | Anthropic | Fallback LLM |
 
 ---
 
 ## 🙏 Acknowledgments
 
-### AI/ML Infrastructure
-- **LangChain/LangGraph**: Orchestration framework for multi-agent RAG pipelines
-- **Sentence-Transformers**: High-quality open-source embedding models
-- **Qdrant Team**: Blazing-fast vector database with excellent Python SDK
-- **Neo4j**: Industry-leading graph database for knowledge representation
-
-### LLM Providers
-- **Ollama**: Local model hosting for privacy-preserving AI
-- **vLLM**: Optimized inference server with PagedAttention
-- **OpenAI**: GPT-4 API for high-quality generation
-- **Google**: Gemini Pro for multimodal capabilities
-
-### Document Processing
-- **Unstructured**: Best-in-class PDF/DOCX parsing library
-- **PyPDF2**: Lightweight metadata extraction
-
-### Evaluation
-- **RAGAS**: Comprehensive RAG evaluation metrics (explodinggradients team)
+| Category | Technology | Role |
+|---|---|---|
+| **Orchestration** | LangGraph / LangChain | Multi-agent state machine |
+| **LLM APIs** | NVIDIA NIM · Groq · Anthropic · OpenAI · Google | Reasoning & generation |
+| **PDF Parsing** | LlamaParse (LlamaIndex) | High-fidelity document extraction |
+| **Semantic Chunking** | Chonkie · HuggingFace `bge-small-en-v1.5` | Token-aware semantic splitting |
+| **Vector Database** | Qdrant | 4096-dim dense retrieval |
+| **Graph Database** | Neo4j | Knowledge graph storage & traversal |
+| **Object Storage** | MinIO | S3-compatible document persistence |
+| **Coreference** | RapidFuzz | Entity deduplication |
+| **Graph Analysis** | NetworkX | Circular dependency detection |
+| **Evaluation** | RAGAS (Exploding Gradients) | RAG quality metrics |
+| **Tracing** | LangSmith | Pipeline observability |
 
 ---
 
-## 🔬 Technical Deep Dives (Advanced Topics)
+<div align="center">
 
-### Constraint-Aware Generation Pipeline
+**Questions · Feedback · Contributions**  
+Open an [issue](https://github.com/yourusername/documind-ai/issues) or submit a [pull request](https://github.com/yourusername/documind-ai/pulls)
 
-The `ConstraintChecker` module implements a novel **predicate extraction + consistency validation** approach:
+<br/>
 
-1. **Predicate Extraction**: LLM parses user query to extract logical constraints
-   ```python
-   # Example query: "Are there records with zero transactions where all records must have ratio >= 20?"
-   # Extracted predicates:
-   [
-       "exists(record) where transactions(record) == 0",
-       "forall(record) ratio(record) >= 20",
-       "ratio = transactions / records"
-   ]
-   ```
+*Built with ❤️ to make LLMs actually reliable on real documents*
 
-2. **Multi-Layered Consistency Verification**: Employs a three-tier check before accepting predicates:
-   - **Heuristic Contradiction Detection**: Regex-based rules catch hard logic flaws (e.g., detecting simultaneous `∃(zero)` and `∀(>0)` constraints).
-   - **Circular Dependency Detection**: Uses regex-based variable mapping to build a lightweight dependency graph and detect cycle patterns in definitions.
-   - **LLM Fallback**: Uses a secondary LLM call to evaluate the complex logical consistency of the combined predicate array.
-
-3. **LLM Consistency Check**: GPT-4 validates that generated answer satisfies all predicates
-   ```python
-   # Structured JSON Validation
-   validation_prompt = f"""
-   Validate if answer satisfies constraints.
-   Constraints: {predicates}
-   Answer: {generated_answer}
-   
-   Return JSON: {{"valid": boolean, "violation": "string"}}
-   """
-   ```
-
-### Math Reasoning Code Execution
-
-The `MathExecutor` module enables **LLM-generated Python code** for quantitative questions:
-
-```python
-class MathExecutor:
-    def process_math_question(self, question, context):
-        # 1. Detect if math reasoning needed (Handled prior to execution)
-        
-        # 2. Extract variables from context using LLM
-        variables = self.extract_variables_from_context(context, question)
-        # Example: {"q1_revenue": 50, "q2_revenue": 60}
-        
-        # 3. Generate Python calculation code
-        code = self.generate_calculation_code(question, variables, context)
-        
-        # 4. Execute in sandboxed subprocess
-        exec_result = self.execute_code_safely(code, timeout=5)
-        
-        # 5. Return Output (Validation skipped to optimize latency)
-        if exec_result["success"]:
-            return {"success": True, "answer": exec_result["output"]}
-        return None
-```
-
-**Safety Measures & Optimizations**:
-  - **Subprocess Isolation**: Code runs in a separate temporary file via Python's `subprocess` module.
-  - **Timeout Protection**: A strict 5-second execution limit prevents infinite loops and hanging processes.
-  - **Latency Optimized Pipeline**: The pipeline skips secondary LLM validation loops to prioritize speed, relying on structured LLM variable extraction and standardized code generation.
-
----
-
-**Questions? Feedback? Contributions?**  
-Open an issue on [GitHub](https://github.com/yourusername/documind-ai) or reach out via [email](mailto:your.email@example.com)
+</div>

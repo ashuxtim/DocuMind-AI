@@ -1,5 +1,12 @@
 # ─── DEPLOYMENT: DocuMind FastAPI Backend ───────────────────────
-# UPDATED: Now uses ConfigMap and Secret instead of hardcoded env vars.
+# Uses ConfigMap and Secret for all configuration.
+#
+# IMAGE NOTE: image tag must be rebuilt to reflect the API stack
+# upgrade (sentence-transformers removed, NVIDIA NIM added).
+# Build and load before applying:
+#   docker build -t documind-fastapi:v2.0 .
+#   minikube image load documind-fastapi:v2.0
+# Then update the image field below to match.
 # ────────────────────────────────────────────────────────────────
 
 apiVersion: apps/v1

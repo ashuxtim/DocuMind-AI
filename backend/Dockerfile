@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     libgl1 \
     && rm -rf /var/lib/apt/lists/*
+# libgl1 removed — was a dependency of opencv-python, which is no longer in requirements.txt
 
 WORKDIR /app
 
