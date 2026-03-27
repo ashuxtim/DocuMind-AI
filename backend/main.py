@@ -594,15 +594,21 @@ async def query_knowledge_base(request: QueryRequest):
             timeout=float(os.getenv("QUERY_TIMEOUT_S", "60")),
         )
 
+        raw_answer = final_state["generation"]
+        clean_answer = re.sub(
+            r'\[[^\]]*SYSTEM NOTE:[^\]]*TRUSTED CODE EXECUTION RESULT[^\]]*\]',
+            '',
+            raw_answer,
+        ).strip()
         return QueryResponse(
-            answer=final_state["generation"],
+            answer=clean_answer,
             context_used=final_state.get("sources", []),
             confidence=(
-                min(final_state.get("top_rerank_score", 0.5) * 0.7, 0.75)
+                max(0.0, min(final_state.get("top_rerank_score", 0.5) * 0.7, 0.75))
                 if final_state.get("has_contradiction", False)
-                else min(final_state.get("top_rerank_score", 0.5), 0.95)
+                else max(0.05, min(final_state.get("top_rerank_score", 0.5), 0.95))
                 if not final_state.get("audit_feedback", "")
-                else min(final_state.get("top_rerank_score", 0.5) * 0.5, 0.5)
+                else max(0.05, min(final_state.get("top_rerank_score", 0.5) * 0.5, 0.5))
             ),
             model="DocuMind-Agent-v2",
         )

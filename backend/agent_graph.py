@@ -200,13 +200,15 @@ def get_services() -> dict:
     print("⏳ Initializing Reranker (NVIDIA NIM llama-nemotron-rerank-1b-v2)...")
     _reranker = NvidiaReranker(api_key=os.getenv("NVIDIA_API_KEY"))
     print("✅ Reranker Ready.")
+    _audit_llm = get_llm_provider(role="audit")
     services = {
         "vector_db":          VectorStore(),
         "kb":                 KnowledgeBase(),
         "llm":                _llm,
+        "audit_llm":          _audit_llm,
         "math_executor":      MathExecutor(get_llm_provider(role="extraction")),
         "graph_builder":      get_graph_builder(),
-        "constraint_checker": ConstraintChecker(_llm),
+        "constraint_checker": ConstraintChecker(_audit_llm),
         "reranker":           _reranker,
     }
     print("✅ Agent services ready")
@@ -251,7 +253,7 @@ def route_question_node(state: AgentState):
       "predicate" — formal constraint language detected
                     → ConstraintChecker runs
       "factual"   — everything else
-                    → ConstraintChecker runs
+                    → ConstraintChecker skipped
 
     multi_entity: True when question signals 2+ named entities.
       → retrieve_node widens top-K from 10 to 15.
@@ -315,7 +317,7 @@ def decompose_query_node(state: AgentState):
     Commit B = financial vocabulary lines in system_prompt.
     """
     svc = get_services()
-    llm = svc["llm"]
+    llm = svc["audit_llm"]
 
     question      = state["question"]
     question_type = state.get("question_type", "factual")
@@ -422,6 +424,15 @@ def retrieve_node(state: AgentState):
 
     sub_queries   = state.get("sub_queries", [state["question"]])
     question      = state["question"]
+
+    # Always include the original question in the retrieval set.
+    # Decomposed sub-queries often drop vocabulary from the original
+    # (e.g. "retainers" → sub-query only says "bonuses"), causing
+    # relevant chunks to be missed. The original question preserves
+    # the full search vocabulary. Dedup on line 461 handles overlaps.
+    if len(sub_queries) > 1 and question not in sub_queries:
+        sub_queries = [question] + sub_queries
+
     selected_docs = state.get("selected_docs", [])
     multi_entity  = state.get("multi_entity", False)
 
@@ -439,17 +450,17 @@ def retrieve_node(state: AgentState):
     base_k = 15 if multi_entity else 10
 
     if len(sub_queries) > 1:
-        per_query_limit = max(3, base_k // len(sub_queries))
+        per_query_limit = max(5, base_k // len(sub_queries))
         print(f"   📊 Multi-query mode: {per_query_limit} docs per sub-query"
               f"{' (multi-entity widened)' if multi_entity else ''}")
 
         for i, sq in enumerate(sub_queries, 1):
-            results = vector_db.search(sq, limit=per_query_limit, filters=search_filters)
+            results = vector_db.hybrid_search(sq, limit=per_query_limit, filters=search_filters)
             for r in results:
                 r['_from_subquery'] = i
             all_vector_results.extend(results)
     else:
-        results = vector_db.search(sub_queries[0], limit=base_k, filters=search_filters)
+        results = vector_db.hybrid_search(sub_queries[0], limit=base_k, filters=search_filters)
         all_vector_results.extend(results)
 
     # --- 2. DEDUPLICATE (MD5 of first 200 chars — fast, whitespace-tolerant) ---
@@ -485,7 +496,7 @@ def retrieve_node(state: AgentState):
             if not filtered:
                 print(f"   ⚠️ No docs above threshold {MIN_RELEVANCE_SCORE} "
                       f"(best: {unique_results[0]['_rerank_score']:.2f})")
-                filtered = unique_results[:3]
+                filtered = unique_results[:7]
 
             unique_results = filtered[:7]
             top_score = unique_results[0]['_rerank_score']
@@ -516,7 +527,10 @@ def retrieve_node(state: AgentState):
     entities = list(graph_builder.extract_query_entities(question))
 
     if entities:
-        graph_context = kb.query_subgraph(entities)
+        graph_context = kb.query_subgraph(
+            entities,
+            source_filter=selected_docs if selected_docs else None,
+        )
         if graph_context:
             docs.insert(0, f"--- RELEVANT GRAPH CONNECTIONS ---\n{graph_context}")
             print(f"   🧠 Graph context added ({len(graph_context)} chars)")
@@ -656,7 +670,11 @@ DO NOT:
 {question}
 """
 
-    response = llm.generate(prompt=user_prompt, system_prompt=system_prompt)
+    response = llm.generate(
+        prompt=user_prompt,
+        system_prompt=system_prompt,
+        max_tokens=8192,
+    )
     return {"generation": response, "retry_count": state.get("retry_count", 0) + 1}
 
 
@@ -763,14 +781,15 @@ def audit_node(state: AgentState):
       Stage 1 (fast, no LLM) — fabrication detection against ALL documents.
                                Returns immediately on violation — no LLM call.
       Stage 2 (constraint)   — logical predicate consistency check.
-                               SKIPPED for math and synthesis question types —
-                               ConstraintChecker adds noise not signal on these.
+                               Runs ONLY for explicit predicate questions.
+                               Skipped for factual/math/synthesis prompts where
+                               omission is not a contradiction.
       Stage 3 (LLM)          — hallucination audit (only reached if 1+2 pass).
 
     Pre-audit shortcut saves ~0.6 LLM calls per query on average.
     """
     svc = get_services()
-    llm                = svc["llm"]
+    llm                = svc["audit_llm"]
     constraint_checker = svc["constraint_checker"]
 
     print("--- 🕵️ AUDITING ANSWER ---")
@@ -782,10 +801,9 @@ def audit_node(state: AgentState):
         return {"audit_feedback": ""}
 
     all_docs = state["documents"]
-    # Full context for fabrication detection — auditor must see all evidence
+    # Full context for fabrication detection AND audit — auditor must see all evidence
     full_context  = "\n".join(all_docs)
-    # Trimmed context for LLM audit call — keeps prompt within budget
-    audit_context = "\n".join(all_docs[:5])
+    audit_context = full_context
 
     # --- STAGE 1: FAST FABRICATION PRE-CHECK (no LLM cost) ---
     print("   ⚡ Running fast fabrication pre-check...")
@@ -806,10 +824,11 @@ def audit_node(state: AgentState):
         }
 
     # --- STAGE 2: CONSTRAINT CHECKING ---
-    # Skipped for math — MathExecutor result is trusted, ConstraintChecker adds no value.
-    # Skipped for synthesis — multi-section comparison questions have no logical predicates
-    # to check; ConstraintChecker fabricates predicates from mathematical language.
-    if question_type not in ("math", "synthesis"):
+    # Run Stage 2 only for explicit predicate questions. Factual questions often
+    # receive short, correct answers that need not restate every retrieved fact.
+    # Treating omitted context as a constraint violation creates false retries and
+    # wastes query budget.
+    if question_type == "predicate":
         print("   🔍 Extracting logic constraints...")
         predicates = constraint_checker.extract_predicates(question, audit_context)
 
@@ -872,7 +891,7 @@ If FAIL: Return a concise description of the error.
 
     user_prompt = f"""
 --- CONTEXT SNIPPET ---
-{audit_context[:2000]}
+{audit_context[:6000]}
 
 --- USER QUESTION ---
 {question}

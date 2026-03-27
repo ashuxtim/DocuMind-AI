@@ -30,7 +30,7 @@ data:
   NVIDIA_MODEL: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
   EMBED_MODEL: "nvidia/nv-embed-v1"
   EMBED_DIM: "4096"
-  RERANK_MODEL: "nvidia/nv-rerankqa-mistral-4b-v3"
+  RERANK_MODEL: "nvidia/llama-nemotron-rerank-1b-v2"
   GROQ_MODEL: "qwen/qwen3-32b"
   GEMINI_MODEL: "gemini-2.5-flash"
   OPENAI_MODEL: "gpt-4o"
@@ -48,6 +48,7 @@ data:
   #   comment out both EXTRACTION_* lines below.
   STRUCTURED_LLM_PROVIDER: "nvidia"
   STRUCTURED_MODEL: "qwen/qwen2.5-coder-32b-instruct"
+  AUDIT_MODEL: "meta/llama-3.1-70b-instruct"
 
   # ── NVIDIA NIM Embedding + Reranker ──
   # Always NVIDIA regardless of LLM_PROVIDER.
@@ -65,12 +66,13 @@ data:
   #   Gemini 2.5 Flash (1M tokens):                    up to ~750K chars
   #   Groq Qwen3-32B (32K tokens):                     do not exceed ~20K chars
   AGENT_MAX_CONTEXT_CHARS: "60000"
+  QUERY_TIMEOUT_S: "300"
 
   # ── Retrieval Thresholds ──
   # Tune after re-ingest without code changes.
   # AGENT_MIN_RERANK_SCORE: logit threshold for NVIDIA reranker (-5.0 default)
   # AGENT_MIN_VECTOR_SCORE: cosine similarity threshold for Qdrant (0.30 default)
-  AGENT_MIN_RERANK_SCORE: "-5.0"
+  AGENT_MIN_RERANK_SCORE: "-15.0"
   AGENT_MIN_VECTOR_SCORE: "0.30"
 
   # ── MinIO (Object Storage) ──
@@ -78,6 +80,8 @@ data:
   MINIO_BUCKET: "documind-uploads"
   MINIO_USE_SSL: "false"
   UPLOAD_FOLDER: "./uploads"
+
+  HF_HUB_OFFLINE: "1"
 
   # ── Observability ──
   LANGCHAIN_TRACING_V2: "true"

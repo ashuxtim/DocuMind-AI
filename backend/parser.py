@@ -268,6 +268,70 @@ class SmartPDFParser:
 
         return final_chunks
 
+    # ── Alias window (Stage 0 for ingest.py alias pre-pass) ──────────────────
+
+    def get_alias_window(self, file_path: str) -> str:
+        """
+        Returns the raw LlamaParse markdown for a PDF — the full text before
+        semantic chunking — as a single string for alias registry extraction.
+
+        Why this exists here:
+          - parse_with_metadata() runs LlamaParse then caches the CHUNKED output.
+          - ingest.py needs the PRE-CHUNK markdown to find alias definitions that
+            straddle chunk boundaries (e.g. a parenthetical on the next line).
+          - This method writes a separate _raw.pkl cache so LlamaParse is only
+            ever called once per file regardless of call order.
+
+        Non-PDF files (docx, txt, md, html) join chunk text as a fallback —
+        alias patterns in those formats are typically within single elements.
+        """
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found at: {file_path}")
+
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext == ".pdf":
+            # Check raw cache first — avoids burning LlamaParse credits twice
+            cache_key = self._file_hash(file_path)
+            raw_cache_path = os.path.join(
+                CACHE_DIR, f"{cache_key}_raw.pkl"
+            )
+            if os.path.exists(raw_cache_path):
+                try:
+                    with open(raw_cache_path, "rb") as f:
+                        return pickle.load(f)
+                except Exception:
+                    pass  # Corrupt cache — re-fetch
+
+            # Call LlamaParse for raw page markdown
+            raw_pages = _parse_pdf_with_llamaparse(file_path)
+            # Join all page texts preserving page boundaries for regex patterns
+            raw_text = "\n\n---PAGE---\n\n".join(
+                p["text"] for p in raw_pages if p.get("text")
+            )
+
+            # Cache both the joined string (alias window) AND the raw page
+            # list (_pages.pkl) so parse_with_metadata() can reuse the pages
+            # without calling LlamaParse again on the same file.
+            try:
+                with open(raw_cache_path, "wb") as f:
+                    pickle.dump(raw_text, f)
+                pages_cache_path = os.path.join(
+                    CACHE_DIR, f"{cache_key}_pages.pkl"
+                )
+                with open(pages_cache_path, "wb") as f:
+                    pickle.dump(raw_pages, f)
+            except Exception as e:
+                print(f"   ⚠️ Raw alias cache write failed: {e}")
+
+            return raw_text
+
+        else:
+            # Non-PDF: join chunks from standard parsing as alias window.
+            # Section headers are preserved in chunk text via unstructured Title elements.
+            chunks = self.parse_with_metadata(file_path)
+            return "\n\n".join(c["text"] for c in chunks if c.get("text"))
+
     # ── Main parse method ─────────────────────────────────────────────────────
 
     def parse_with_metadata(self, file_path: str) -> List[Dict]:
@@ -294,7 +358,20 @@ class SmartPDFParser:
                 # Cloud parser — burns LLAMA_CLOUD_API_KEY credits on first ingest.
                 # Parse cache above means each unique file only costs credits once.
                 print(f"📄 Parsing {os.path.basename(file_path)} with LlamaParse...")
-                base_chunks = _parse_pdf_with_llamaparse(file_path)
+                # Reuse raw pages cached by get_alias_window() if Stage 0
+                # already called LlamaParse — avoids double API credit burn.
+                pages_cache_path = os.path.join(
+                    CACHE_DIR, f"{self._file_hash(file_path)}_pages.pkl"
+                )
+                if os.path.exists(pages_cache_path):
+                    try:
+                        with open(pages_cache_path, "rb") as f:
+                            base_chunks = pickle.load(f)
+                        print(f"   ⚡ Reusing LlamaParse pages from Stage 0 cache")
+                    except Exception:
+                        base_chunks = _parse_pdf_with_llamaparse(file_path)
+                else:
+                    base_chunks = _parse_pdf_with_llamaparse(file_path)
                 final_chunks = self._apply_semantic_chunking(base_chunks)
 
             else:
