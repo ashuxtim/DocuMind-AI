@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback } from 'react';
-import { Network, ZoomIn, ZoomOut, Maximize2, RefreshCw, Filter } from 'lucide-react';
+import { Network, ZoomIn, ZoomOut, Maximize2, RefreshCw, Filter, BarChart2 } from 'lucide-react';
 import { useGraphData } from '@/hooks/useGraphData';
 import GraphExplorer from '@/components/graph/GraphExplorer';
 import { GraphFilterPanel } from '@/components/graph/GraphFilterPanel';
+import { GraphStatsPanel } from '@/components/graph/GraphStatsPanel';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Badge } from '@/ui/badge';
@@ -23,8 +24,10 @@ export function GraphPage() {
   const [searchValue, setSearchValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [activeTypes, setActiveTypes] = useState(new Set(ALL_TYPES));
   const [typeCounts, setTypeCounts] = useState({});
+  const [liveGraph, setLiveGraph] = useState(null);
   const explorerRef = useRef(null);
 
   const handleSearchKeyDown = useCallback(
@@ -57,6 +60,10 @@ export function GraphPage() {
       Object.entries(typeCounts).sort(([, a], [, b]) => b - a)[0]?.[0] ?? 'Entity';
     setActiveTypes(new Set([mostConnected]));
   }, [typeCounts]);
+
+  const handleGraphReady = useCallback((g) => {
+    setLiveGraph(g);
+  }, []);
 
   const hiddenCount = ALL_TYPES.length - activeTypes.size;
 
@@ -132,6 +139,17 @@ export function GraphPage() {
               )}
             </div>
 
+            {/* Stats panel toggle */}
+            <Button
+              variant={statsOpen ? 'default' : 'outline'}
+              size="icon"
+              className="h-7 w-7"
+              title="Graph statistics"
+              onClick={() => setStatsOpen((o) => !o)}
+            >
+              <BarChart2 className="w-3.5 h-3.5" />
+            </Button>
+
             {/* Camera controls */}
             <Button
               variant="outline"
@@ -205,6 +223,13 @@ export function GraphPage() {
           typeCounts={typeCounts}
         />
 
+        {/* Stats panel — positioned over the graph, slides in from the right */}
+        <GraphStatsPanel
+          isOpen={statsOpen}
+          onClose={() => setStatsOpen(false)}
+          graph={liveGraph}
+        />
+
         {/* Sigma needs a real pixel height — ensure parent chain has h-full */}
         {graph && !loading && !error && (
           <div className="w-full h-full">
@@ -214,6 +239,7 @@ export function GraphPage() {
               search={committedSearch}
               activeTypes={activeTypes}
               onTypeCounts={setTypeCounts}
+              onGraphReady={handleGraphReady}
             />
           </div>
         )}

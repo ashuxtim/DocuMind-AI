@@ -19,7 +19,7 @@ const SIGMA_SETTINGS = {
 };
 
 const GraphExplorer = forwardRef(function GraphExplorer(
-  { graph, search, activeTypes, onTypeCounts },
+  { graph, search, activeTypes, onTypeCounts, onGraphReady },
   ref,
 ) {
   const containerRef = useRef(null);
@@ -88,6 +88,9 @@ const GraphExplorer = forwardRef(function GraphExplorer(
       counts[attrs.group] = (counts[attrs.group] || 0) + 1;
     });
     onTypeCounts?.(counts);
+
+    // Pass the live graphology instance up so the parent can feed GraphStatsPanel
+    onGraphReady?.(graph);
 
     // Zoom-based label level-of-detail: higher ratio = more zoomed out
     const handleCameraUpdate = () => {
