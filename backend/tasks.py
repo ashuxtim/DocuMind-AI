@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 import redis
-from celery.exceptions import Ignore
+from celery.exceptions import Ignore, SoftTimeLimitExceeded
 from celery_app import celery_app
 
 # ── Module-level singletons ───────────────────────────────────────────────────
@@ -60,7 +60,7 @@ def ingest_document_task(self, filename: str):
         return status_data is not None and status_data.get("status") == "cancelled"
 
     # Determine if GPU lock is needed
-    provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+    provider = os.getenv("LLM_PROVIDER", "groq").lower()
     needs_lock = provider not in CLOUD_PROVIDERS
 
     gpu_lock = None
@@ -126,3 +126,59 @@ def ingest_document_task(self, filename: str):
                     print(f"🔓 GPU lock released for {filename}")
             except Exception as e:
                 print(f"⚠️ Failed to release GPU lock for {filename}: {e}")
+
+
+@celery_app.task(
+    bind=True,
+    name="run_evaluation",
+    soft_time_limit=3600,
+    time_limit=3900,
+)
+def run_evaluation_task(self, regenerate: bool = False):
+    if state_manager is None:
+        raise RuntimeError(
+            "Worker not initialised — worker_process_init signal "
+            "may not have fired."
+        )
+
+
+    redis_client.set(
+        "documind:eval_status",
+        "running",
+        ex=3600
+    )
+
+    try:
+        from evaluate_ragas import run_as_task as _run_ragas
+        result = _run_ragas(regenerate=regenerate)
+
+        redis_client.set(
+            "documind:eval_status",
+            "completed",
+            ex=86400
+        )
+        redis_client.set(
+            "documind:eval_last_task_id",
+            self.request.id,
+            ex=86400
+        )
+
+        return result
+
+    except SoftTimeLimitExceeded:
+        error_msg = "Evaluation timed out after 60 minutes."
+        redis_client.set(
+            "documind:eval_status",
+            f"failed:{error_msg}",
+            ex=3600,
+        )
+        raise
+
+    except Exception as e:
+        error_msg = str(e)
+        redis_client.set(
+            "documind:eval_status",
+            f"failed:{error_msg[:200]}",
+            ex=3600
+        )
+        raise

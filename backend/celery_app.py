@@ -23,6 +23,29 @@ celery_app.conf.update(
     result_expires=3600,   # 1 hour — covers any realistic frontend polling window
 )
 
+import threading
+import time
+
+def _heartbeat_loop(path: str = "/tmp/worker-heartbeat", interval: int = 20):
+    """
+    Background thread — writes a timestamp file every 20 seconds.
+    Runs independently of task execution so the Kubernetes liveness
+    probe never mistakes a busy worker for a dead one.
+    """
+    while True:
+        try:
+            with open(path, "w") as f:
+                f.write(str(time.time()))
+        except Exception:
+            pass
+        time.sleep(interval)
+
+@celery_app.on_after_configure.connect
+def start_heartbeat(sender, **kwargs):
+    """Start heartbeat thread when Celery app is configured."""
+    t = threading.Thread(target=_heartbeat_loop, daemon=True)
+    t.start()
+
 # Register tasks
 import tasks  # noqa: E402, F401
 

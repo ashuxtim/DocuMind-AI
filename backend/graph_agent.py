@@ -4,7 +4,9 @@ import json
 import asyncio
 import logging
 from functools import lru_cache
+from itertools import combinations
 from typing import List, Dict, Optional, Tuple
+from nameparser import HumanName
 from llm_provider import get_llm_provider
 from langsmith import traceable
 
@@ -15,6 +17,24 @@ logger = logging.getLogger(__name__)
 ALLOWED_NODE_TYPES = {
     "Person", "Organization", "Location", "Technology", "Product",
     "Event", "Concept", "Document", "Law", "Date", "Amount"
+}
+
+# Only identity-bearing types get alias tracking.
+# Concept / Document / Law / Date / Amount are contextual — storing aliases
+# on them causes cross-document contamination and unbounded list growth.
+ALIAS_ENABLED_TYPES = {"Person", "Organization"}
+
+# Token-based query expansion for defined legal/financial terms.
+# Keys are single lowercase tokens. At query time, any token in the question
+# that matches a key appends the expansion terms to the keyword search list.
+# Add entries here as new documents expose new blind spots.
+LEGAL_TERM_EXPANSIONS: Dict[str, List[str]] = {
+    "bridge":     ["IP Bridge Agreement", "IP Bridge"],
+    "interim":    ["IP Bridge Agreement", "interim arrangement"],
+    "temporary":  ["IP Bridge Agreement"],
+    "closing":    ["Closing Date", "Closing Conditions"],
+    "itar":       ["DDTC", "Directorate of Defense Trade Controls"],
+    "regulatory": ["DDTC", "ITAR"],
 }
 
 # ALLOWED_EDGE_TYPES removed — LLM generates freely with formatting rules
@@ -76,8 +96,14 @@ TEXT:
 
 QUERY_PROMPT = """
 Extract search keywords from this question for a knowledge graph lookup.
-Return ONLY a JSON array of 3-8 entity names.
-Example: ["Elon Musk", "Tesla", "2003"]
+Include: people, organizations, dates, amounts, AND defined terms,
+acronyms, or document-specific named concepts (e.g. named agreements,
+regulatory frameworks, compliance standards, named indices).
+Return ONLY a JSON array of 3-8 keywords.
+Examples:
+  ["Elon Musk", "Tesla", "2003"]
+  ["IP Bridge Agreement", "DCA-7", "Closing Date"]
+  ["IGDTA", "Intragroup Data Transfer Agreement", "Section 5.1"]
 JSON array:
 {question}
 """.strip()
@@ -167,6 +193,64 @@ def _validate_graph(raw: dict) -> dict | None:
     return {"nodes": nodes, "edges": edges}
 
 
+# ── Merge Guards ──────────────────────────────────────────────────────────────
+
+def _strip_suffixes(name: str) -> str:
+    """
+    Strip post-nominal credentials before nameparser comparison.
+    Handles: "Dr. Patricia Nwankwo, PhD, SHRM-SCP" → "Dr. Patricia Nwankwo"
+    Removes trailing comma-separated credential tokens only — not mid-name commas.
+    """
+    return re.sub(
+        r',\s*[A-Z][A-Za-z\-\.]+(?:\s*,\s*[A-Z][A-Za-z\-\.]+)*$',
+        '',
+        name
+    ).strip()
+
+
+def should_block_merge(a: str, b: str) -> bool:
+    """
+    Returns True if two Person names must NOT be merged.
+    Uses nameparser.HumanName for reliable first/last extraction.
+
+    Truth table:
+      - Both have first + last, first same, last differs  → BLOCK  (Gerald Ashford vs Gerald Fontaine)
+      - Both have first + last, first differs, last differs → BLOCK  (different people entirely)
+      - Both have first + last, first differs, last same   → ALLOW  (siblings / different people same family)
+      - One is surname-only                                → ALLOW  (topology pass handles this)
+      - Neither has a parsed first name                   → ALLOW  (fall through to rapidfuzz)
+    """
+    na = HumanName(_strip_suffixes(a))
+    nb = HumanName(_strip_suffixes(b))
+
+    # Surname-only detection: if either name is a single token
+    # and that token appears as a word in the other name,
+    # this is a surname-only form — allow through for topology pass.
+    a_tokens = _strip_suffixes(a).split()
+    b_tokens = _strip_suffixes(b).split()
+    if len(a_tokens) == 1 and a_tokens[0].lower() in _strip_suffixes(b).lower().split():
+        return False  # surname-only form of longer name — allow
+    if len(b_tokens) == 1 and b_tokens[0].lower() in _strip_suffixes(a).lower().split():
+        return False  # surname-only form of longer name — allow
+
+    both_have_first = bool(na.first and nb.first)
+    if not both_have_first:
+        return False  # Can't compare — let rapidfuzz decide
+
+    first_differ = na.first.lower() != nb.first.lower()
+    last_differ  = na.last.lower()  != nb.last.lower()
+
+    # Same first, different last → definitely different people
+    if not first_differ and last_differ:
+        return True
+
+    # Different first AND different last → different people
+    if first_differ and last_differ:
+        return True
+
+    return False
+
+
 # ── Entity Registry ───────────────────────────────────────────────────────────
 
 def _build_entity_registry(
@@ -208,9 +292,39 @@ def _build_entity_registry(
             if name_b in assigned:
                 continue
             if fuzz.token_sort_ratio(name_a, name_b) >= 60:
+                # Nameparser guard — runs before any Person is added to a cluster.
+                # Blocks same-first/different-last merges (Gerald Ashford vs Gerald Fontaine).
+                # Only applies to Person nodes — Orgs use rapidfuzz + LLM path.
+                if name_set.get(name_a) == "Person" and name_set.get(name_b) == "Person":
+                    if should_block_merge(name_a, name_b):
+                        logger.info("🚫 Blocked merge: '%s' ≠ '%s' (nameparser guard)",
+                                    name_a, name_b)
+                        continue
                 cluster.append(name_b)
                 assigned.add(name_b)
+
+        # Post-cluster safety net — validates ALL pairs in the completed cluster.
+        # Catches cases where two blocked names entered the same cluster via
+        # a third bridging name. If any blocked pair is found, the entire cluster
+        # is discarded back to singletons — no partial merges.
         if len(cluster) > 1:
+            has_conflict = any(
+                name_set.get(x) == "Person"
+                and name_set.get(y) == "Person"
+                and should_block_merge(x, y)
+                for x, y in combinations(cluster, 2)
+            )
+            if has_conflict:
+                logger.info(
+                    "🚫 Post-cluster conflict — splitting cluster back to singletons: %s",
+                    cluster
+                )
+                # Remove non-pivot members from assigned so they can
+                # still form valid clusters with other names.
+                # The pivot (name_a) stays assigned — it was processed.
+                for name in cluster[1:]:
+                    assigned.discard(name)
+                continue
             clusters.append(cluster)
 
     auto_registry: Dict[str, str] = {}
@@ -245,9 +359,19 @@ def _apply_registry_to_graphs(
     Rewrite node names and ids across all graphs using the registry.
     Updates all edge source_id and target_id to match new ids.
     Deduplicates nodes that resolve to the same canonical name.
+
+    For ALIAS_ENABLED_TYPES (Person, Organization): stores the list of absorbed
+    names as node["properties"]["aliases"] so knowledge_graph.py can persist them
+    to Neo4j with safe list-merge Cypher (never via SET n += which overwrites).
     """
     if not registry:
         return all_graphs
+
+    # Build reverse map: canonical_name → [absorbed names] for alias-enabled types
+    # Used to populate aliases property on canonical nodes before Neo4j write.
+    canonical_to_aliases: Dict[str, List[str]] = {}
+    for absorbed, canonical in registry.items():
+        canonical_to_aliases.setdefault(canonical, []).append(absorbed)
 
     def to_id(name: str) -> str:
         return re.sub(r"[^a-z0-9_]", "",
@@ -265,7 +389,17 @@ def _apply_registry_to_graphs(
             old_id = node["id"]
             if old_id != new_id:
                 id_remap[old_id] = new_id
-            new_nodes.append({**node, "name": new_name, "id": new_id})
+
+            new_props = dict(node.get("properties", {}))
+
+            # Store absorbed aliases on identity-bearing nodes only.
+            # Passed as a separate property so knowledge_graph.py can use
+            # safe list-merge Cypher rather than SET n += which overwrites.
+            if node["type"] in ALIAS_ENABLED_TYPES and new_name in canonical_to_aliases:
+                new_props["aliases"] = canonical_to_aliases[new_name]
+
+            new_nodes.append({**node, "name": new_name, "id": new_id,
+                               "properties": new_props})
 
         # Deduplicate nodes merged to same id — keep first occurrence
         seen: Dict[str, bool] = {}
@@ -301,6 +435,10 @@ class GraphBuilder:
             print("⚠️  LangSmith tracing DISABLED — LANGCHAIN_API_KEY not set")
         else:
             print("✅ LangSmith tracing enabled")
+
+        # Initialise merge registry state — populated by apply_entity_registry()
+        self.last_auto_registry: Dict[str, str] = {}
+        self.last_llm_registry: Dict[str, str] = {}
 
     def _parse_json_dict(self, response: str) -> dict:
         clean = re.sub(r'```(?:json)?', '', response).strip()
@@ -484,6 +622,11 @@ class GraphBuilder:
 
         all_graphs = _apply_registry_to_graphs(all_graphs, full_registry)
 
+        # Step 4b: Store merge registries so ingest.py can write
+        # MERGED_INTO provenance edges AFTER nodes exist in Neo4j.
+        self.last_auto_registry = auto_registry
+        self.last_llm_registry = llm_registry
+
         # Step 5: Edge type normalisation
         all_graphs = self._normalise_edge_types(all_graphs)
 
@@ -501,6 +644,10 @@ class GraphBuilder:
         LLM-based keyword extraction for graph search at query time.
         Returns tuple for lru_cache hashability.
         Call site: list(agent.extract_query_entities(question))
+
+        After LLM extraction, runs token-based expansion via LEGAL_TERM_EXPANSIONS
+        to catch defined legal/financial terms that LLM NER misses (e.g. "IP Bridge
+        Agreement" from a query phrased as "interim arrangement").
         """
         try:
             response_text = self.llm.generate(
@@ -508,7 +655,36 @@ class GraphBuilder:
             )
             result = self._parse_json_list(response_text)
             if result:
-                return tuple(result[:8])
+                keywords = list(result[:8])
+
+                # Token-based expansion — check every word in the original question
+                # against LEGAL_TERM_EXPANSIONS keys (lowercase single tokens).
+                question_tokens = question.lower().split()
+                expansions = []
+                for token in question_tokens:
+                    clean_token = re.sub(r"[^a-z]", "", token)
+                    if clean_token in LEGAL_TERM_EXPANSIONS:
+                        expansions.extend(LEGAL_TERM_EXPANSIONS[clean_token])
+
+                if expansions:
+                    # Deduplicate while preserving order — expansions appended after LLM keywords
+                    seen = set(keywords)
+                    for exp in expansions:
+                        if exp not in seen:
+                            keywords.append(exp)
+                            seen.add(exp)
+                    logger.info("Query expansion added: %s", expansions)
+
+                # Strip honorifics so "Mr. Raymond Voss" → "Raymond Voss"
+                # matches Neo4j fulltext which stores question-phrased names.
+                HONORIFICS = {"mr.", "ms.", "mrs.", "dr.", "prof.", "mx."}
+                def _strip_honorific(name: str) -> str:
+                    parts = name.strip().split()
+                    if parts and parts[0].lower().rstrip(".") + "." in HONORIFICS:
+                        return " ".join(parts[1:])
+                    return name
+
+                return tuple(_strip_honorific(k) for k in keywords)
         except Exception:
             pass
         return tuple(w for w in question.split() if len(w) > 4)

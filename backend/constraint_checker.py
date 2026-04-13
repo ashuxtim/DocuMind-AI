@@ -25,6 +25,60 @@ class ConstraintChecker:
     def __init__(self, llm):
         self.llm = llm
 
+    def _normalize_predicates(self, predicates: List[str]) -> List[str]:
+        """
+        Normalize time/duration expressions so equivalent values
+        don't appear as contradictions to the LLM consistency checker.
+        '2 years', 'two years', 'two-year', '24 months', 'twenty-four months',
+        'twenty-four (24) months' all become '24_months'.
+        """
+        patterns = [
+            (r'\btwo[\s-]year\w*\b',                        '24_months'),
+            (r'\b2[\s-]year\w*\b',                          '24_months'),
+            (r'\btwenty[\s-]four\s*\(?\s*24\s*\)?\s*month\w*\b', '24_months'),
+            (r'\btwenty[\s-]four\s*month\w*\b',             '24_months'),
+            (r'\b24[\s-]month\w*\b',                        '24_months'),
+            (r'\bone[\s-]year\w*\b',                        '12_months'),
+            (r'\b1[\s-]year\w*\b',                          '12_months'),
+            (r'\btwelve\s*month\w*\b',                      '12_months'),
+            (r'\b12[\s-]month\w*\b',                        '12_months'),
+            (r'\bthree[\s-]year\w*\b',                      '36_months'),
+            (r'\b3[\s-]year\w*\b',                          '36_months'),
+            (r'\bthirty[\s-]six\s*month\w*\b',              '36_months'),
+            (r'\b36[\s-]month\w*\b',                        '36_months'),
+            (r'\bfive[\s-]year\w*\b',                       '60_months'),
+            (r'\b5[\s-]year\w*\b',                          '60_months'),
+        ]
+        normalized = []
+        for pred in predicates:
+            p = pred
+            for pattern, replacement in patterns:
+                p = re.sub(pattern, replacement, p, flags=re.IGNORECASE)
+            normalized.append(p)
+        return normalized
+
+    def _filter_reference_predicates(self, predicates: List[str]) -> List[str]:
+        """
+        Deterministically remove predicates that are document cross-references.
+        These are never logical constraints — they cause false violations when
+        the retrieved chunk label differs from the cross-reference in the text.
+        """
+        skip_patterns = [
+            r'\bsection\s+\d',
+            r'\bpage\s+\d',
+            r'\bappendix\b',
+            r'\bsee\s+(section|page|above|below)\b',
+            r'summarized\s+in\s+section',
+            r'described\s+in\s+section',
+            r'outlined\s+in\s+section',
+            r'refer\s+to\s+section',
+        ]
+        compiled = [re.compile(p, re.IGNORECASE) for p in skip_patterns]
+        return [
+            pred for pred in predicates
+            if not any(pat.search(pred) for pat in compiled)
+        ]
+
     # -----------------------------------------------------------------------
     # Fix 1 — Robust JSON parsing helpers
     # Copied verbatim from graph_agent.py — do not diverge.
@@ -75,6 +129,7 @@ class ConstraintChecker:
             return json.loads(_PREDICATE_CACHE[cache_key])
 
         result = self._do_extract_predicates(question, context)
+        result = self._filter_reference_predicates(result)
 
         # Fix 6 — store result
         _PREDICATE_CACHE[cache_key] = json.dumps(result)
@@ -88,6 +143,11 @@ class ConstraintChecker:
         CRITICAL: Preserve all numeric values exactly as written.
         Do not convert, scale, abbreviate, or reformat any numbers.
         $9,720,000 must remain $9,720,000 — never $9.72M or $9,720,000,000.
+
+        EXCLUDE any predicate that references a section number, page number, or
+        cross-reference to another part of the document (e.g. 'terms are summarized
+        in Section 5.2'). Only extract predicates about facts, values, names, dates,
+        or logical relationships between entities.
 
         Output JSON array of constraint strings.
         Example:
@@ -110,7 +170,7 @@ class ConstraintChecker:
         JSON array:"""
 
         try:
-            response = self.llm.generate(prompt, system_prompt)
+            response = self.llm.generate(prompt, system_prompt, max_tokens=400)
             return self._parse_json_list(response)  # Fix 1
         except Exception as e:
             print(f"   ⚠️ Predicate extraction failed: {e}")
@@ -140,8 +200,9 @@ class ConstraintChecker:
         if self._detect_circular_dependency(predicates):
             return False, "CIRCULAR DEPENDENCY: Definition depends on itself"
 
-        # Rule 3: LLM check — Fix 3: always runs, gate removed
-        return self._llm_consistency_check(predicates, context)
+        # Rule 3: LLM check — normalize time expressions first, then check
+        normalized = self._normalize_predicates(predicates)
+        return self._llm_consistency_check(normalized, context)
 
     # -----------------------------------------------------------------------
     # Fix 4 — Circular dependency detection via networkx
@@ -187,11 +248,24 @@ class ConstraintChecker:
     # -----------------------------------------------------------------------
     def _llm_consistency_check(self, predicates: List[str], context: str) -> Tuple[bool, str]:
         """Use LLM for complex consistency checking."""
-        system_prompt = """You are a formal logic checker.
+        system_prompt = """You are a strict formal logic checker.
         Check if these predicates can ALL be true simultaneously.
 
-        Return JSON:
-        {"consistent": true/false, "explanation": "..."}
+        EQUIVALENCE RULES — these are NEVER contradictions:
+        - Same quantity expressed differently: "$35,000/month" = "$35,000 per month" = "monthly retainer of $35,000"
+        - Normalized time tokens are canonical: "24_months" always equals "24_months"
+        - Active vs passive voice describing the same fact is NOT a contradiction
+        - A fact mentioned in multiple predicates with slightly different wording is NOT a contradiction
+
+        ONLY return consistent=false when there is a GENUINE logical impossibility:
+        - Two different numeric values for the same quantity (e.g. $35,000 vs $40,000)
+        - Mutually exclusive states (e.g. entity both exists and does not exist)
+        - Mathematical impossibility (X > 0 AND X = 0)
+
+        When in doubt, return consistent=true. False positives cause more harm than false negatives.
+
+        Return JSON only:
+        {"consistent": true/false, "explanation": "brief reason or null"}
         """
 
         # Fix 5 — raised from 800 to 2000 chars to match extract_predicates
@@ -206,7 +280,7 @@ class ConstraintChecker:
         JSON:"""
 
         try:
-            response = self.llm.generate(prompt, system_prompt)
+            response = self.llm.generate(prompt, system_prompt, max_tokens=400)
             result = self._parse_json_dict(response)  # Fix 1
             if result:
                 return result['consistent'], result.get('explanation', 'LLM check')
@@ -224,7 +298,11 @@ class ConstraintChecker:
         self, answer: str, predicates: List[str]
     ) -> Tuple[bool, str]:
         """
-        Check if the answer violates any constraints.
+        Check if the answer directly contradicts any constraints.
+
+        This validator is for contradiction detection, not completeness scoring.
+        A concise answer can be valid even if it omits related facts that appear
+        in the retrieved context, as long as it does not state something false.
 
         On LLM failure returns (True, "VALIDATION_ERROR: ...") — the caller
         (audit_node in agent_graph.py) should check for this prefix and treat
@@ -233,9 +311,22 @@ class ConstraintChecker:
         if not predicates:
             return True, "No constraints to check"
 
-        system_prompt = """Check if this answer violates the constraints.
-        Return JSON:
-        {"valid": true/false, "violation": "description or null"}
+        system_prompt = """You are a contradiction checker.
+        Determine whether the answer DIRECTLY contradicts any constraint.
+
+        Mark valid=false ONLY when the answer explicitly conflicts with a constraint,
+        such as:
+        - a different number, date, section, or named entity for the same fact
+        - saying something is allowed when a constraint says it is prohibited
+        - saying something does not exist when a constraint says it does exist
+
+        DO NOT mark the answer invalid merely because it is brief, incomplete,
+        or does not mention every constraint. Omission is not a contradiction.
+
+        When in doubt, return valid=true.
+
+        Return JSON only:
+        {"valid": true/false, "violation": "brief contradiction or null"}
         """
 
         prompt = f"""Validate:
@@ -248,7 +339,7 @@ class ConstraintChecker:
         JSON:"""
 
         try:
-            response = self.llm.generate(prompt, system_prompt)
+            response = self.llm.generate(prompt, system_prompt, max_tokens=400)
             result = self._parse_json_dict(response)  # Fix 1
 
             if result:

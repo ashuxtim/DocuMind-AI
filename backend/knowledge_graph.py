@@ -35,6 +35,32 @@ ON CREATE SET r.created_at = timestamp(),
               r.document_id = $document_id, r.chunk_id = $chunk_id
 """
 
+# Safe list-merge for aliases — never overwrites existing aliases from prior ingests.
+# Only runs for ALIAS_ENABLED_TYPES (Person, Organization).
+# Pure Cypher list comprehension — no APOC dependency required.
+ALIAS_UPSERT = """
+MATCH (n {name: $name})
+SET n.aliases =
+  CASE
+    WHEN n.aliases IS NULL THEN $aliases
+    ELSE n.aliases + [x IN $aliases WHERE NOT x IN n.aliases]
+  END
+"""
+
+# Merge provenance edge — written when a node is absorbed into a canonical.
+# method:     how the merge was decided (nameparser_guard / topology / rapidfuzz / llm)
+# confidence: blocked / uncertain / confirmed
+MERGED_INTO_UPSERT = """
+MATCH (a {name: $absorbed_name})
+MATCH (b {name: $canonical_name})
+MERGE (a)-[m:MERGED_INTO]->(b)
+SET m.method     = $method,
+    m.score      = $score,
+    m.evidence   = $evidence,
+    m.timestamp  = datetime(),
+    m.confidence = $confidence
+"""
+
 
 class KnowledgeBase:
     def __init__(self):
@@ -94,13 +120,20 @@ class KnowledgeBase:
                 # Nodes first — chunk_id comes from each node's own properties
                 for node in graph.get("nodes", []):
                     try:
+                        # Strip aliases from properties before NODE_UPSERT.
+                        # aliases must never flow through SET n += $properties
+                        # because that overwrites existing alias lists.
+                        # _ingest_aliases() handles alias persistence safely.
+                        props = {k: v for k, v in
+                                 node.get("properties", {}).items()
+                                 if k != "aliases"}
                         session.run(
                             NODE_UPSERT.format(node_type=node["type"]),
                             name=node["name"],
                             id=node["id"],
                             document_id=document_id,
                             chunk_id=node.get("properties", {}).get("chunk_id", ""),
-                            properties=node.get("properties", {})
+                            properties=props
                         )
                     except Exception as e:
                         logger.warning("Node upsert failed %s: %s", node.get("name"), e)
@@ -128,36 +161,116 @@ class KnowledgeBase:
         total_edges = sum(len(g.get("edges", [])) for g in graphs)
         print(f"   -> Graph stored {total_nodes} nodes, {total_edges} edges for {document_id}")
 
-    def query_subgraph(self, keywords: List[str]) -> str:
+        # Write aliases for identity-bearing nodes (Person, Organization only)
+        self._ingest_aliases(graphs)
+
+    def _ingest_aliases(self, graphs: List[Dict]) -> None:
+        """
+        Persist aliases list to Neo4j for all nodes that have one.
+        Uses safe list-merge Cypher — never overwrites aliases from prior ingests.
+        Called after all nodes are guaranteed to exist in Neo4j.
+        """
+        if not self.driver:
+            return
+
+        alias_count = 0
+        with self.driver.session() as session:
+            for graph in graphs:
+                for node in graph.get("nodes", []):
+                    aliases = node.get("properties", {}).get("aliases")
+                    if not aliases:
+                        continue
+                    try:
+                        session.run(
+                            ALIAS_UPSERT,
+                            name=node["name"],
+                            aliases=aliases
+                        )
+                        alias_count += len(aliases)
+                    except Exception as e:
+                        logger.warning("Alias upsert failed for %s: %s",
+                                       node.get("name"), e)
+
+        if alias_count:
+            print(f"   -> Alias merge: {alias_count} alias(es) persisted")
+
+    def ingest_merged_into(
+        self,
+        absorbed_name: str,
+        canonical_name: str,
+        method: str,
+        score: float,
+        evidence: List[str],
+        confidence: str
+    ) -> None:
+        """
+        Write a MERGED_INTO provenance edge between an absorbed node and its canonical.
+        Called by graph_agent.py or ingest.py when a confirmed merge is recorded.
+
+        method:     'nameparser_guard' | 'topology' | 'rapidfuzz' | 'llm'
+        confidence: 'blocked' | 'uncertain' | 'confirmed'
+        evidence:   list of strings describing why the merge was made/blocked
+                    e.g. ['first_name_conflict'] or ['EMPLOYED_AT:Vantage Systems, Inc.']
+        """
+        if not self.driver:
+            return
+        try:
+            with self.driver.session() as session:
+                session.run(
+                    MERGED_INTO_UPSERT,
+                    absorbed_name=absorbed_name,
+                    canonical_name=canonical_name,
+                    method=method,
+                    score=score,
+                    evidence=evidence,
+                    confidence=confidence
+                )
+        except Exception as e:
+            logger.warning("MERGED_INTO upsert failed %s→%s: %s",
+                           absorbed_name, canonical_name, e)
+
+    def query_subgraph(self, keywords: List[str], source_filter: List[str] = None) -> str:
         if not self.driver or not keywords:
             return ""
 
         keyword_query = " OR ".join(f'"{kw}"' for kw in keywords if kw.strip())
-
-        query = """
+        doc_filter_clause = "AND node.document_id IN $doc_ids" if source_filter else ""
+        query = f"""
         CALL db.index.fulltext.queryNodes('entity_fulltext', $keyword_query)
-        YIELD node AS n, score
-        WHERE score > 0.3
+        YIELD node, score
+        WHERE score > 0.3 {doc_filter_clause}
 
-        MATCH (n)-[r1]-(m)
+        WITH node, max(score) AS score
+        ORDER BY score DESC
+
+        WITH DISTINCT node, score
+
+        MATCH (node)-[r1]-(m)
 
         OPTIONAL MATCH (m)-[r2]-(leaf)
         WHERE type(r2) IN ['RELATED_TO', 'MENTIONS']
 
-        WITH DISTINCT
-            n.name AS n_name,
+        RETURN DISTINCT
+            node.name AS n_name,
+            node.aliases AS n_aliases,
             type(r1) AS rel,
             m.name AS m_name,
             type(r2) AS rel2,
             leaf.name AS leaf_node
-        RETURN n_name, rel, m_name, rel2, leaf_node
         LIMIT 50
         """
         try:
             with self.driver.session() as session:
                 results = []
-                for r in session.run(query, keyword_query=keyword_query):
-                    base = f"({r['n_name']}) -[{r['rel']}]-> ({r['m_name']})"
+                query_params = {"keyword_query": keyword_query}
+                if source_filter:
+                    query_params["doc_ids"] = source_filter
+                for r in session.run(query, **query_params):
+                    node_label = r['n_name']
+                    aliases = r.get('n_aliases')
+                    if aliases:
+                        node_label += f" (aka: {', '.join(aliases)})"
+                    base = f"({node_label}) -[{r['rel']}]-> ({r['m_name']})"
                     if r['rel2'] and r['leaf_node']:
                         base += f"\n  └─> [{r['rel2']}] --> ({r['leaf_node']})"
                     results.append(base)

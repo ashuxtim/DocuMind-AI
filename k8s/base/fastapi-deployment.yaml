@@ -27,9 +27,43 @@ spec:
         app: fastapi
         component: backend
     spec:
+      initContainers:
+      - name: seed-model-cache
+        image: documind-fastapi:v2.0
+        env:
+        - name: SENTENCE_TRANSFORMERS_HOME
+          value: /model-cache
+        - name: HF_HOME
+          value: /model-cache
+        command: [python, -c]
+        args:
+          - |
+              import os
+              from pathlib import Path
+              cache = Path("/model-cache")
+              marker = cache / "bge-small-ready"
+              if marker.exists():
+                  print("✅ Model cache already seeded, skipping")
+              else:
+                  print("⏳ First start — seeding model cache...")
+                  from sentence_transformers import SentenceTransformer
+                  import nltk
+                  SentenceTransformer("BAAI/bge-small-en-v1.5")
+                  nltk.download("punkt_tab", quiet=True)
+                  nltk.download("averaged_perceptron_tagger_eng", quiet=True)
+                  marker.touch()
+                  print("✅ Model cache seeded")
+        volumeMounts:
+        - name: model-cache
+          mountPath: /model-cache
+      - name: wait-for-deps
+        image: busybox
+        command: ['sh', '-c']
+        args:
+          - until nc -z redis-service 6379 && nc -z qdrant-service 6333 && nc -z neo4j-service 7687; do echo "waiting for deps..."; sleep 2; done
       containers:
       - name: fastapi
-        image: documind-fastapi:v1.1
+        image: documind-fastapi:v2.0
         imagePullPolicy: Never
 
         ports:
@@ -84,7 +118,7 @@ spec:
 
         volumeMounts:
         - name: model-cache
-          mountPath: /root/.cache/huggingface
+          mountPath: /model-cache
 
       volumes:
       - name: model-cache

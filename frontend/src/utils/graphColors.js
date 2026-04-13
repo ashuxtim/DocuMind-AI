@@ -44,7 +44,7 @@ export function getLinkColor(link, hoveredId, highlightLinks) {
     if (label === 'REVISES') {
         return 'rgba(251, 191, 36, 0.28)';      // amber-400
     }
-    return 'rgba(148, 163, 184, 0.18)';          // slate-400, subtle but present
+    return 'rgba(148, 163, 184, 0.45)';          // slate-400, visible at default zoom
 }
 
 /**

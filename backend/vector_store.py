@@ -1,11 +1,15 @@
 import os
+import re
 import hashlib
+import mmh3
+from collections import Counter
 from typing import List, Dict, Optional, Any
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
-    Distance, VectorParams, PointStruct,
+    Distance, VectorParams, SparseVectorParams, Modifier,
+    PointStruct, SparseVector,
     Filter, FieldCondition, MatchValue, MatchAny,
-    PayloadSchemaType
+    PayloadSchemaType, Prefetch, FusionQuery, Fusion
 )
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 
@@ -25,7 +29,8 @@ class VectorStore:
             host=host,
             port=port,
             grpc_port=int(os.getenv("QDRANT_GRPC_PORT", 6334)),
-            prefer_grpc=True
+            prefer_grpc=True,
+            check_compatibility=False
         )
         self.collection_name = collection_name
 
@@ -35,7 +40,7 @@ class VectorStore:
         # ingest.py sends batches of 20, so every call fits within one API request.
         # Vectors are L2-normalised by the API — normalize_embeddings is not a caller concern.
         self.embedding_model = NVIDIAEmbeddings(
-            model=os.getenv("EMBED_MODEL", "nvidia/nv-embedqa-mistral-7b-v2"),
+            model=os.getenv("EMBED_MODEL", "nvidia/nv-embed-v1"),
             api_key=os.getenv("NVIDIA_API_KEY"),
             truncate="END"
         )
@@ -51,19 +56,20 @@ class VectorStore:
         exists = any(c.name == self.collection_name for c in collections)
 
         if not exists:
-            print(f"🧠 Creating Qdrant collection: {self.collection_name}")
-
-            # payload indexes + on_disk to save RAM
+            print(f"🧠 Creating Qdrant collection: {self.collection_name} (named vectors: dense + bm25)")
             self.client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=VectorParams(
-                    size=self.vector_size,
-                    distance=Distance.COSINE,
-                    on_disk=True    # vectors stored on disk, not in RAM
-                )
+                vectors_config={
+                    "dense": VectorParams(
+                        size=self.vector_size,
+                        distance=Distance.COSINE,
+                        on_disk=True
+                    )
+                },
+                sparse_vectors_config={
+                    "bm25": SparseVectorParams(modifier=Modifier.IDF)
+                }
             )
-
-            # payload indexes for fast filtered search and deletion
             self._create_payload_indexes()
 
         else:
@@ -72,13 +78,25 @@ class VectorStore:
             print(f"🔍 Collection exists — verifying payload indexes...")
             self._create_payload_indexes()
 
-            # Warn if existing collection has wrong vector size (e.g. old 768-dim BGE)
             info = self.client.get_collection(self.collection_name)
-            existing_size = info.config.params.vectors.size
-            if existing_size != self.vector_size:
-                print(f"⚠️  VECTOR SIZE MISMATCH: collection has {existing_size}-dim vectors "
-                      f"but model produces {self.vector_size}-dim. "
-                      f"Run `make wipe-qdrant` and re-ingest all documents.")
+            vectors_config = info.config.params.vectors
+            if isinstance(vectors_config, dict):
+                dense_cfg = vectors_config.get("dense")
+                if dense_cfg and dense_cfg.size != self.vector_size:
+                    print(f"⚠️  VECTOR SIZE MISMATCH: 'dense' slot has {dense_cfg.size}-dim "
+                          f"but model produces {self.vector_size}-dim. "
+                          f"Run `make wipe-qdrant` and re-ingest all documents.")
+                if "bm25" not in (info.config.params.sparse_vectors or {}):
+                    raise RuntimeError(
+                        "Collection has named dense vectors but no 'bm25' sparse slot. "
+                        "Run `make wipe-qdrant` and re-ingest."
+                    )
+            else:
+                raise RuntimeError(
+                    f"Collection '{self.collection_name}' uses old flat VectorParams schema "
+                    f"(size={vectors_config.size}). Cannot migrate in-place. "
+                    f"Run `make wipe-qdrant` then re-ingest all documents."
+                )
 
     def _create_payload_indexes(self):
         index_fields = [
@@ -110,6 +128,15 @@ class VectorStore:
         raw = f"{filename}::{text}"
         return hashlib.md5(raw.encode()).hexdigest()
 
+    def _compute_sparse_vector(self, text: str) -> SparseVector:
+        # Tokenize → TF count → mmh3 hash each token to a 1M-slot index space.
+        # Client sends raw TF; Modifier.IDF on the collection applies IDF server-side → BM25.
+        tokens = re.findall(r'\b[a-zA-Z0-9]+\b', text.lower())
+        term_counts = Counter(tokens)
+        indices = [mmh3.hash(term, signed=False) % (2 ** 20) for term in term_counts]
+        values  = [float(count) for count in term_counts.values()]
+        return SparseVector(indices=indices, values=values)
+
     def add_documents(self, texts: List[str], metadatas: List[Dict], filename: str):
         if not texts:
             return
@@ -122,7 +149,10 @@ class VectorStore:
         points = [
             PointStruct(
                 id=self._make_point_id(filename, text),
-                vector=emb,
+                vector={
+                    "dense": emb,
+                    "bm25":  self._compute_sparse_vector(text),
+                },
                 payload={**meta, "text": text, "source": filename}
             )
             for i, (text, meta, emb) in enumerate(zip(texts, metadatas, embeddings))
@@ -136,10 +166,9 @@ class VectorStore:
 
         print(f"   -> Indexed {len(points)} chunks in {num_batches} batch(es).")
 
-    def search(self, query: str, limit: int = 15, filters: Dict[str, Any] = None) -> List[Dict]:
-        # embed_query() handles the query/passage asymmetry internally.
-        # BGE instruction prefix removed — it was BGE-specific and does not apply here.
-        query_vector = self.embedding_model.embed_query(query)
+    def hybrid_search(self, query: str, limit: int = 15, filters: Dict[str, Any] = None) -> List[Dict]:
+        dense_query_vector  = self.embedding_model.embed_query(query)
+        sparse_query_vector = self._compute_sparse_vector(query)
 
         query_filter = None
         if filters:
@@ -152,27 +181,51 @@ class VectorStore:
             if conditions:
                 query_filter = Filter(must=conditions)
 
-        # score_threshold drops clearly irrelevant results before reranking.
-        # Default 0.30 is a starting point — tune via AGENT_MIN_VECTOR_SCORE after re-ingest.
-        # Both thresholds (vector + reranker) are env-var controlled for production tuning.
-        min_score = float(os.getenv("AGENT_MIN_VECTOR_SCORE", "0.30"))
+        # No score_threshold on Prefetch — BM25 dot-product scores and cosine scores
+        # are on different scales. Thresholding happens after reranking in agent_graph.py.
         search_result = self.client.query_points(
             collection_name=self.collection_name,
-            query=query_vector,
-            query_filter=query_filter,
+            prefetch=[
+                Prefetch(
+                    query=dense_query_vector,
+                    using="dense",
+                    filter=query_filter,
+                    limit=limit * 3,
+                ),
+                Prefetch(
+                    query=sparse_query_vector,
+                    using="bm25",
+                    filter=query_filter,
+                    limit=limit * 3,
+                ),
+            ],
+            query=FusionQuery(fusion=Fusion.RRF),
             limit=limit,
             with_payload=True,
-            score_threshold=min_score
         ).points
+
+        # Apply vector score pre-filter to remove low-quality candidates before
+        # they enter the reranker pipeline. AGENT_MIN_VECTOR_SCORE defaults to 0.30
+        # which is appropriate for RRF fusion scores (range 0–1). Tune via env var.
+        min_vector_score = float(os.getenv("AGENT_MIN_VECTOR_SCORE", "0.30"))
+        before_count = len(search_result)
+        search_result = [hit for hit in search_result if hit.score >= min_vector_score]
+        if len(search_result) < before_count:
+            print(f"   🔽 Vector pre-filter: {before_count} → {len(search_result)} candidates "
+                  f"(threshold: {min_vector_score})")
 
         return [
             {
                 "text": hit.payload.get("text", ""),
                 "metadata": {k: v for k, v in hit.payload.items() if k != "text"},
-                "score": hit.score
+                "score": hit.score,
             }
             for hit in search_result
         ]
+
+    def search(self, query: str, limit: int = 15, filters: Dict[str, Any] = None) -> List[Dict]:
+        # Backward-compat alias — all calls now go through hybrid_search().
+        return self.hybrid_search(query=query, limit=limit, filters=filters)
 
     def delete_file(self, filename: str):
         # source field is indexed — this is O(log n) not O(n)
@@ -188,3 +241,86 @@ class VectorStore:
             )
         )
         print(f"   -> Removed vectors for {filename}")
+
+    def scroll_by_filename(self, filename: str, limit: int = 500) -> list:
+        """
+        Fetch all stored chunks for a given filename by metadata filter,
+        without requiring a query vector.
+
+        Uses Qdrant's scroll() API against the KEYWORD-indexed 'source' field,
+        making each page retrieval O(log n). Paginates automatically until
+        next_page_offset is None. Results are sorted by chunk_id ascending so
+        that first/middle/last chunk selection works correctly downstream.
+
+        Returns a list of dicts: [{"text": "...", "chunk_id": <value>}, ...]
+        Returns [] if the filename has no indexed chunks or on any error.
+
+        Used by the lightweight /summarize route to retrieve document content
+        without running the full RAG retrieval pipeline.
+        """
+        source_filter = Filter(
+            must=[
+                FieldCondition(
+                    key="source",
+                    match=MatchValue(value=filename)
+                )
+            ]
+        )
+
+        try:
+            all_chunks = []
+            offset = None
+
+            while True:
+                points, next_offset = self.client.scroll(
+                    collection_name=self.collection_name,
+                    scroll_filter=source_filter,
+                    limit=limit,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+
+                for point in points:
+                    all_chunks.append({
+                        "text":     point.payload.get("text", ""),
+                        "chunk_id": point.payload.get("chunk_id", None),
+                    })
+
+                if next_offset is None:
+                    break
+                offset = next_offset
+
+            # Sort by chunk_id ascending so document order is preserved.
+            # chunk_id can be int or string (e.g. "2_1" from semantic sub-chunks)
+            # — sort as string to handle both safely.
+            all_chunks.sort(
+                key=lambda c: str(c["chunk_id"]) if c["chunk_id"] is not None else ""
+            )
+
+            print(f"   -> scroll_by_filename: {len(all_chunks)} chunks for '{filename}'")
+            return all_chunks
+
+        except Exception as e:
+            print(f"   ⚠️ scroll_by_filename failed for '{filename}': {e}")
+            return []
+
+    def list_sources(self) -> list[str]:
+        """Return all unique source filenames currently in the collection."""
+        sources = set()
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=250,
+                offset=offset,
+                with_payload=["source"],
+                with_vectors=False,
+            )
+            for p in points:
+                src = (p.payload or {}).get("source")
+                if src:
+                    sources.add(src)
+            if offset is None:
+                break
+        return sorted(sources)

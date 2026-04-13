@@ -25,7 +25,9 @@ class LLMProvider(ABC):
     def _strip_think_tags(content: str) -> str:
         if not content:
             return ""
-        return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+        content = re.sub(r'<think>.*', '', content, flags=re.DOTALL)
+        return content.strip()
 
     @abstractmethod
     def generate(self, prompt: str, system_prompt: str = "", max_tokens: int = 8192) -> str:
@@ -226,7 +228,10 @@ class NvidiaProvider(LLMProvider):
                   f"{response.usage.completion_tokens} out "
                   f"(total: {response.usage.total_tokens} | session: {self.total_tokens_used})")
 
-        return self._strip_think_tags(response.choices[0].message.content)
+        content = response.choices[0].message.content
+        if not content:
+            content = getattr(response.choices[0].message, 'reasoning_content', '') or ''
+        return self._strip_think_tags(content)
 
     def get_model_name(self) -> str:
         return self.model_name
@@ -284,29 +289,28 @@ def _init_llm_provider(prefix: str = "") -> LLMProvider:
     explicitly in the configmap. There is no per-provider model fallback for
     extraction because the extraction role always targets one specific model.
 
-    Auto-detect (LLM_PROVIDER=auto) is primary-only. Extraction role must be
-    explicit — if EXTRACTION_LLM_PROVIDER is not set, the caller falls back to
-    the primary instance without calling this function.
+    Auto-detect (LLM_PROVIDER=auto) is NOT supported — provider must be set
+    explicitly. If LLM_PROVIDER is missing or set to 'auto', the app will fail
+    at startup with a clear error message.
+    Extraction role: if EXTRACTION_LLM_PROVIDER is not set, falls back to primary.
     """
-    provider_type = os.getenv(f"{prefix}LLM_PROVIDER", "auto").lower()
+    provider_env_key = f"{prefix}LLM_PROVIDER"
+    provider_type = os.getenv(provider_env_key, "").lower()
     is_extraction = bool(prefix)
 
-    # Auto-detect: primary role only
-    if not is_extraction and provider_type in ("auto", ""):
-        if os.getenv("NVIDIA_API_KEY"):
-            provider_type = "nvidia"
-        elif os.getenv("GROQ_API_KEY"):
-            provider_type = "groq"
-        elif os.getenv("GEMINI_API_KEY"):
-            provider_type = "gemini"
-        elif os.getenv("OPENAI_API_KEY"):
-            provider_type = "openai"
-        else:
-            raise ValueError(
-                "No LLM provider configured. Set LLM_PROVIDER and the corresponding "
-                "API key (NVIDIA_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY). "
-                "To use Anthropic, set LLM_PROVIDER=anthropic explicitly."
-            )
+    if not provider_type:
+        raise RuntimeError(
+            f"{provider_env_key} must be set explicitly. "
+            f"Valid values: nvidia, groq, gemini, openai, anthropic. "
+            f"Set it in k8s/base/documind-configmap.yaml "
+            f"(and uncomment in backend/.env for local dev)."
+        )
+
+    if provider_type == "auto":
+        raise RuntimeError(
+            f"{provider_env_key}=auto is not supported. "
+            f"Set an explicit provider: nvidia, groq, gemini, openai, or anthropic."
+        )
 
     # Model resolution:
     # - Extraction role: flat EXTRACTION_MODEL, required.
@@ -328,39 +332,76 @@ def _init_llm_provider(prefix: str = "") -> LLMProvider:
         api_key = os.getenv("NVIDIA_API_KEY")
         if not api_key:
             raise RuntimeError(
-                "NVIDIA_API_KEY is required for NVIDIA provider. "
-                "Set it in your K8s secret."
+                "NVIDIA_API_KEY is required when LLM_PROVIDER=nvidia. "
+                "Add it to backend/.env and run: make secrets"
             )
-        model = model_override or os.getenv("NVIDIA_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5")
+        model = model_override or os.getenv("PRIMARY_MODEL") or os.getenv("NVIDIA_MODEL")
+        if not model:
+            raise RuntimeError(
+                "PRIMARY_MODEL (or NVIDIA_MODEL) must be set when LLM_PROVIDER=nvidia. "
+                "Add it to k8s/base/documind-configmap.yaml"
+            )
         instance = NvidiaProvider(api_key=api_key, model_name=model)
 
     elif provider_type == "groq":
-        model = model_override or os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
-        instance = GroqProvider(
-            api_key=os.getenv("GROQ_API_KEY"),
-            model_name=model
-        )
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY is required when LLM_PROVIDER=groq. "
+                "Add it to backend/.env and run: make secrets"
+            )
+        model = model_override or os.getenv("GROQ_MODEL")
+        if not model:
+            raise RuntimeError(
+                "GROQ_MODEL must be set when LLM_PROVIDER=groq. "
+                "Add it to k8s/base/documind-configmap.yaml"
+            )
+        instance = GroqProvider(api_key=api_key, model_name=model)
 
     elif provider_type == "openai":
-        model = model_override or os.getenv("OPENAI_MODEL", "gpt-4o")
-        instance = OpenAIProvider(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model_name=model
-        )
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY is required when LLM_PROVIDER=openai. "
+                "Add it to backend/.env and run: make secrets"
+            )
+        model = model_override or os.getenv("OPENAI_MODEL")
+        if not model:
+            raise RuntimeError(
+                "OPENAI_MODEL must be set when LLM_PROVIDER=openai. "
+                "Add it to k8s/base/documind-configmap.yaml"
+            )
+        instance = OpenAIProvider(api_key=api_key, model_name=model)
 
     elif provider_type == "gemini":
-        model = model_override or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        instance = GeminiProvider(
-            api_key=os.getenv("GEMINI_API_KEY"),
-            model_name=model
-        )
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY is required when LLM_PROVIDER=gemini. "
+                "Add it to backend/.env and run: make secrets"
+            )
+        model = model_override or os.getenv("GEMINI_MODEL")
+        if not model:
+            raise RuntimeError(
+                "GEMINI_MODEL must be set when LLM_PROVIDER=gemini. "
+                "Add it to k8s/base/documind-configmap.yaml"
+            )
+        instance = GeminiProvider(api_key=api_key, model_name=model)
 
     elif provider_type == "anthropic":
-        model = model_override or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-        instance = AnthropicProvider(
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            model_name=model
-        )
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic. "
+                "Add it to backend/.env and run: make secrets"
+            )
+        model = model_override or os.getenv("ANTHROPIC_MODEL")
+        if not model:
+            raise RuntimeError(
+                "ANTHROPIC_MODEL must be set when LLM_PROVIDER=anthropic. "
+                "Add it to k8s/base/documind-configmap.yaml"
+            )
+        instance = AnthropicProvider(api_key=api_key, model_name=model)
 
     else:
         raise ValueError(
@@ -373,9 +414,9 @@ def _init_llm_provider(prefix: str = "") -> LLMProvider:
 
 
 # ── Singletons ────────────────────────────────────────────────────────────────
-# Both initialised once at import time — no race condition possible.
-# Extraction falls back to primary if EXTRACTION_LLM_PROVIDER is not set,
-# preserving existing single-model behaviour with no config change required.
+# All three initialised once at import time — no race condition possible.
+# Extraction falls back to primary if STRUCTURED_LLM_PROVIDER is not set.
+# Audit falls back to extraction if AUDIT_MODEL is not set.
 
 _primary_instance: LLMProvider = _init_llm_provider(prefix="")
 
@@ -384,19 +425,107 @@ if os.getenv("STRUCTURED_LLM_PROVIDER"):
 else:
     _extraction_instance: LLMProvider = _primary_instance
 
+_audit_model_name = os.getenv("AUDIT_MODEL")
+if _audit_model_name:
+    # Provider type: AUDIT_LLM_PROVIDER → STRUCTURED_LLM_PROVIDER → LLM_PROVIDER → nvidia
+    _audit_provider_type = (
+        os.getenv("AUDIT_LLM_PROVIDER")
+        or os.getenv("STRUCTURED_LLM_PROVIDER")
+        or os.getenv("LLM_PROVIDER", "nvidia")
+    ).lower()
+    if _audit_provider_type in ("auto", ""):
+        raise RuntimeError(
+            "Could not determine audit LLM provider. "
+            "Set AUDIT_LLM_PROVIDER explicitly in k8s/base/documind-configmap.yaml."
+        )
+    print(f"🔧 Initializing audit LLM provider: {_audit_provider_type.upper()} / {_audit_model_name}")
+    if _audit_provider_type == "nvidia":
+        _audit_instance: LLMProvider = NvidiaProvider(
+            api_key=os.getenv("NVIDIA_API_KEY"), model_name=_audit_model_name
+        )
+    elif _audit_provider_type == "groq":
+        _audit_instance: LLMProvider = GroqProvider(
+            api_key=os.getenv("GROQ_API_KEY"), model_name=_audit_model_name
+        )
+    elif _audit_provider_type == "gemini":
+        _audit_instance: LLMProvider = GeminiProvider(
+            api_key=os.getenv("GEMINI_API_KEY"), model_name=_audit_model_name
+        )
+    elif _audit_provider_type == "openai":
+        _audit_instance: LLMProvider = OpenAIProvider(
+            api_key=os.getenv("OPENAI_API_KEY"), model_name=_audit_model_name
+        )
+    elif _audit_provider_type == "anthropic":
+        _audit_instance: LLMProvider = AnthropicProvider(
+            api_key=os.getenv("ANTHROPIC_API_KEY"), model_name=_audit_model_name
+        )
+    else:
+        print(f"⚠️  Unknown audit provider '{_audit_provider_type}', falling back to extraction instance")
+        _audit_instance: LLMProvider = _extraction_instance
+    print(f"✅ Audit LLM ready: {_audit_instance.get_model_name()}")
+else:
+    _audit_instance: LLMProvider = _extraction_instance
+
+_router_model_name = os.getenv("ROUTER_MODEL")
+if _router_model_name:
+    _router_provider_type = (
+        os.getenv("ROUTER_LLM_PROVIDER")
+        or os.getenv("LLM_PROVIDER", "nvidia")
+    ).lower()
+    if _router_provider_type in ("auto", ""):
+        raise RuntimeError(
+            "Could not determine router LLM provider. "
+            "Set ROUTER_LLM_PROVIDER explicitly in k8s/base/documind-configmap.yaml."
+        )
+
+    print(f"🔧 Initializing Router LLM: {_router_model_name} (provider: {_router_provider_type})")
+
+    if _router_provider_type == "nvidia":
+        _router_instance: LLMProvider = NvidiaProvider(
+            api_key=os.getenv("NVIDIA_API_KEY"), model_name=_router_model_name
+        )
+    elif _router_provider_type == "groq":
+        _router_instance: LLMProvider = GroqProvider(
+            api_key=os.getenv("GROQ_API_KEY"), model_name=_router_model_name
+        )
+    elif _router_provider_type == "gemini":
+        _router_instance: LLMProvider = GeminiProvider(
+            api_key=os.getenv("GEMINI_API_KEY"), model_name=_router_model_name
+        )
+    elif _router_provider_type == "openai":
+        _router_instance: LLMProvider = OpenAIProvider(
+            api_key=os.getenv("OPENAI_API_KEY"), model_name=_router_model_name
+        )
+    elif _router_provider_type == "anthropic":
+        _router_instance: LLMProvider = AnthropicProvider(
+            api_key=os.getenv("ANTHROPIC_API_KEY"), model_name=_router_model_name
+        )
+    else:
+        _router_instance: LLMProvider = _primary_instance
+        
+    print(f"✅ Router LLM ready: {_router_model_name}")
+else:
+    _router_instance: LLMProvider = _primary_instance
+
 
 def get_llm_provider(role: str = "primary") -> LLMProvider:
     """
     Return the singleton LLM instance for the given role.
 
-    role="primary"    → reasoning, generation, audit (nemotron-super by default)
+    role="primary"    → answer generation (nemotron-super-49b by default)
     role="extraction" → graph extraction, coref, edge normalisation (qwen2.5-coder-32b)
+    role="audit"      → decomposition, constraint checking, hallucination audit (llama-3.1-70b)
 
-    If EXTRACTION_LLM_PROVIDER is not configured, both roles return the same
-    primary instance — safe default, no behaviour change for existing deployments.
+    Extraction falls back to primary if STRUCTURED_LLM_PROVIDER is not set.
+    Audit falls back to extraction if AUDIT_MODEL is not set.
     """
     if role == "extraction":
         print(f"♻️  Reusing extraction LLM instance ({_extraction_instance.get_model_name()})")
         return _extraction_instance
+    elif role == "audit":
+        print(f"♻️  Reusing audit LLM instance ({_audit_instance.get_model_name()})")
+        return _audit_instance
+    elif role == "router":
+        return _router_instance
     print(f"♻️  Reusing primary LLM instance ({_primary_instance.get_model_name()})")
     return _primary_instance

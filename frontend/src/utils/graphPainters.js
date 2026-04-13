@@ -105,78 +105,20 @@ export function paintNode(node, ctx, globalScale, state) {
         return;
     }
 
-    // ====================================================================
-    //  LAYER 1 — Wide faint halo (high-degree hubs + hovered only)
-    //  Uses additive blending for a soft luminance effect.
-    // ====================================================================
     const isHub = degree >= HIGH_DEGREE;
-    if ((isHub || isHovered) && !isDimmed && globalScale > 0.4) {
-        const saved = ctx.globalCompositeOperation;
-        ctx.globalCompositeOperation = 'lighter';
 
-        // Subtle time-based alpha oscillation for hubs (ambient micro-life)
-        let pulseAlpha = 0;
-        if (isHub && !isHovered && tier.ambientGlow) {
-            const time = typeof performance !== 'undefined' ? performance.now() : Date.now();
-            pulseAlpha = 0.02 * (0.5 + 0.5 * Math.sin(time / 1800 + node.x * 0.01));
-        }
-
-        const haloRadius = nodeRadius * (isHovered ? 4 : 3);
-        const haloAlpha = isHovered ? 0.12 : 0.05 + pulseAlpha;
-        const haloColor = isHovered ? '#10B981' : rawColor;
-        const grad = ctx.createRadialGradient(
-            node.x, node.y, nodeRadius * 0.3,
-            node.x, node.y, haloRadius
-        );
-        grad.addColorStop(0, rgba(haloColor, haloAlpha));
-        grad.addColorStop(1, rgba(haloColor, 0));
-        ctx.fillStyle = grad;
+    // ====================================================================
+    //  LAYER 1 — Shadow (single offset circle for depth)
+    // ====================================================================
+    if (!isDimmed) {
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
         ctx.beginPath();
-        ctx.arc(node.x, node.y, haloRadius, 0, 2 * Math.PI);
-        ctx.fill();
-
-        ctx.globalCompositeOperation = saved;
-    }
-
-    // ====================================================================
-    //  LAYER 2 — Soft color glow (ambient for medium+, stronger on hover)
-    // ====================================================================
-    if (!isDimmed && tier.ambientGlow && globalScale > 0.5) {
-        const glowRadius = nodeRadius * (isHovered ? 2.8 : isNeighbor ? 2.2 : 1.8);
-        let glowAlpha;
-        if (isHovered) glowAlpha = 0.28;
-        else if (isNeighbor) glowAlpha = 0.18;
-        else if (isHub) glowAlpha = 0.10;
-        else if (degree >= MED_DEGREE) glowAlpha = 0.06;
-        else glowAlpha = 0;   // low-degree: skip glow entirely
-
-        if (glowAlpha > 0) {
-            const gc = isHovered ? '#10B981' : isNeighbor ? '#6366F1' : rawColor;
-            const grad2 = ctx.createRadialGradient(
-                node.x, node.y, nodeRadius * 0.4,
-                node.x, node.y, glowRadius
-            );
-            grad2.addColorStop(0, rgba(gc, glowAlpha));
-            grad2.addColorStop(1, rgba(gc, 0));
-            ctx.fillStyle = grad2;
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, glowRadius, 0, 2 * Math.PI);
-            ctx.fill();
-        }
-    }
-
-    // ====================================================================
-    //  LAYER 3 — Drop shadow (top 5 hubs only, subtle)
-    // ====================================================================
-    if (isHub && !isDimmed && globalScale > 0.7) {
-        ctx.fillStyle = 'rgba(0,0,0,0.18)';
-        ctx.beginPath();
-        ctx.arc(node.x + 1.2, node.y + 1.2, nodeRadius + 0.5, 0, 2 * Math.PI);
+        ctx.arc(node.x + 1.5, node.y + 1.5, nodeRadius + 1, 0, 2 * Math.PI);
         ctx.fill();
     }
 
     // ====================================================================
-    //  LAYER 4 — Core circle
+    //  LAYER 2 — Core circle
     // ====================================================================
     ctx.fillStyle = fillColor;
     ctx.beginPath();
@@ -184,56 +126,30 @@ export function paintNode(node, ctx, globalScale, state) {
     ctx.fill();
 
     // ====================================================================
-    //  LAYER 5 — Bright inner highlight (top half crescent for dimensionality)
-    // ====================================================================
-    if (!isDimmed && globalScale > 0.8 && degree >= MED_DEGREE) {
-        const highlightGrad = ctx.createRadialGradient(
-            node.x, node.y - nodeRadius * 0.35, nodeRadius * 0.15,
-            node.x, node.y, nodeRadius
-        );
-        highlightGrad.addColorStop(0, 'rgba(255,255,255,0.18)');
-        highlightGrad.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = highlightGrad;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, nodeRadius, 0, 2 * Math.PI);
-        ctx.fill();
-    }
-
-    // ====================================================================
-    //  LAYER 6 — Border ring
+    //  LAYER 3 — Border ring
     // ====================================================================
     if (isHovered) {
         ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-        ctx.lineWidth = 2;
     } else if (isNeighbor) {
         ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-        ctx.lineWidth = 1.5;
     } else if (isDimmed) {
         ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-        ctx.lineWidth = 0.5;
     } else if (isHub) {
         ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-        ctx.lineWidth = 1.2;
     } else {
         ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-        ctx.lineWidth = 0.8;
     }
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.arc(node.x, node.y, nodeRadius, 0, 2 * Math.PI);
     ctx.stroke();
 
     // ====================================================================
-    //  LAYER 7 — Labels (pill background, LOD + degree gated)
+    //  LAYER 4 — Labels (always visible at globalScale >= 0.6)
     // ====================================================================
-    const shouldShowLabel =
-        isHovered ||
-        isNeighbor ||
-        (globalScale > tier.showLabelsAtScale) ||
-        (degree > tier.labelDegreeThreshold && globalScale > 1.0);
-
-    if (shouldShowLabel && !isDimmed) {
+    if (globalScale >= 0.6 && !isDimmed) {
         const label = node.id;
-        const fontSize = Math.min(14, Math.max(9, 11 / globalScale));
+        const fontSize = Math.min(13, Math.max(8, 11 / globalScale));
         ctx.font = `500 ${fontSize}px Inter, system-ui, -apple-system, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -247,23 +163,13 @@ export function paintNode(node, ctx, globalScale, state) {
         const pillR = pillH / 2;
 
         // Dark pill background
-        ctx.fillStyle = 'rgba(10, 15, 28, 0.78)';
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
         ctx.beginPath();
         ctx.roundRect(node.x - pillW / 2, labelY - pillH / 2, pillW, pillH, pillR);
         ctx.fill();
 
-        // Subtle border glow matching node color
-        const borderColor = isHovered ? '#10B981' : isNeighbor ? '#6366F1' : rawColor;
-        ctx.strokeStyle = rgba(borderColor, 0.25);
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
-
         // Text
-        ctx.fillStyle = isHovered
-            ? 'rgba(255,255,255,0.95)'
-            : isNeighbor
-                ? 'rgba(255,255,255,0.88)'
-                : 'rgba(220,225,235,0.82)';
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
         ctx.fillText(label, node.x, labelY);
     }
 }
@@ -275,10 +181,11 @@ export function paintNode(node, ctx, globalScale, state) {
  * Used as linkCanvasObject callback.
  */
 export function paintLinkLabel(link, ctx, globalScale, tier) {
-    if (globalScale < tier.showRelationLabelsAtScale) return;
+    if (globalScale < 1.2) return;
 
-    const label = link.label;
-    if (!label) return;
+    const rawLabel = link.label;
+    if (!rawLabel) return;
+    const label = rawLabel.length > 20 ? rawLabel.slice(0, 20) + '\u2026' : rawLabel;
 
     const source = link.source;
     const target = link.target;
@@ -288,7 +195,7 @@ export function paintLinkLabel(link, ctx, globalScale, tier) {
     const midX = (source.x + target.x) / 2;
     const midY = (source.y + target.y) / 2;
 
-    const fontSize = Math.min(10, Math.max(7, 9 / globalScale));
+    const fontSize = 9;
     ctx.font = `400 ${fontSize}px Inter, system-ui, sans-serif`;
 
     const textWidth = ctx.measureText(label).width;
@@ -299,7 +206,7 @@ export function paintLinkLabel(link, ctx, globalScale, tier) {
     const pillR = pillH / 2;
 
     // Background pill
-    ctx.fillStyle = 'rgba(10, 15, 28, 0.82)';
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
     ctx.beginPath();
     ctx.roundRect(midX - pillW / 2, midY - pillH / 2, pillW, pillH, pillR);
     ctx.fill();
@@ -310,7 +217,7 @@ export function paintLinkLabel(link, ctx, globalScale, tier) {
     ctx.stroke();
 
     // Text
-    ctx.fillStyle = 'rgba(180, 190, 205, 0.85)';
+    ctx.fillStyle = '#CBD5E1';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, midX, midY);

@@ -18,43 +18,37 @@ data:
   QDRANT_PORT: "6333"
   QDRANT_GRPC_PORT: "6334"
 
-  # ── Primary LLM (reasoning, generation, audit) ──
-  # Powers query decomposition, answer generation, and audit stages.
-  # NVIDIA is the primary provider — also powers embeddings + reranker
-  # regardless of LLM_PROVIDER setting.
-  # Anthropic is explicit-only — auto-detect will never land on it.
-  #
+  # ── LLM Providers ──
   # Auto-detect priority (when LLM_PROVIDER=auto):
   #   NVIDIA → GROQ → GEMINI → OPENAI
+  # Anthropic is explicit-only — auto-detect will never land on it.
+
+  # ── NVIDIA — serves: primary, audit, router, structured extraction, embedding, reranker ──
   LLM_PROVIDER: "nvidia"
-  NVIDIA_MODEL: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+  PRIMARY_MODEL: "meta/llama-3.3-70b-instruct"         # primary
+  AUDIT_LLM_PROVIDER: "nvidia"
+  AUDIT_MODEL: "mistralai/mistral-small-4-119b-2603"   # audit
+  ROUTER_LLM_PROVIDER: "nvidia"
+  ROUTER_MODEL: "mistralai/mistral-small-4-119b-2603"  # router
+  STRUCTURED_LLM_PROVIDER: "nvidia"
+  STRUCTURED_MODEL: "qwen/qwen2.5-coder-32b-instruct"  # structured extraction
+  NVIDIA_MODEL: "nvidia/llama-3.3-nemotron-super-49b-v1.5"  # nvidia fallback model
   EMBED_MODEL: "nvidia/nv-embed-v1"
-  EMBED_DIM: "4096"
-  RERANK_MODEL: "nvidia/nv-rerankqa-mistral-4b-v3"
-  GROQ_MODEL: "qwen/qwen3-32b"
-  GEMINI_MODEL: "gemini-2.5-flash"
+  EMBED_DIM: "4096"                                    # embedding
+  RERANK_MODEL: "nvidia/llama-nemotron-rerank-1b-v2"   # reranker
+  JUDGE_EMBED_MODEL: "nvidia/nv-embedqa-e5-v5"         # judge embeddings (ragas)
+
+  # ── GOOGLE — serves: judge (ragas eval) ──
+  JUDGE_LLM_PROVIDER: "google"
+  JUDGE_MODEL: "gemini-2.5-flash"                      # judge llm
+  GEMINI_MODEL: "gemini-2.5-flash"                     # google fallback model
+
+  # ── GROQ — serves: fallback only (currently inactive) ──
+  GROQ_MODEL: "llama-3.3-70b-versatile"                # groq fallback model
+
+  # ── OTHER PROVIDERS — fallback only, never auto-selected ──
   OPENAI_MODEL: "gpt-4o"
   ANTHROPIC_MODEL: "claude-sonnet-4-6"
-
-  # ── Extraction LLM (graph extraction, coref, edge normalisation) ──
-  # Separate model for structured JSON output tasks — faster and cheaper
-  # than the primary reasoning model for this workload.
-  # Uses same NVIDIA_API_KEY as primary — no extra secret needed.
-  #
-  # EXTRACTION_MODEL is a flat override — no per-provider model variants.
-  # If EXTRACTION_LLM_PROVIDER is not set, extraction falls back to primary.
-  #
-  # To disable dual-model and use primary for everything:
-  #   comment out both EXTRACTION_* lines below.
-  STRUCTURED_LLM_PROVIDER: "nvidia"
-  STRUCTURED_MODEL: "qwen/qwen2.5-coder-32b-instruct"
-
-  # ── NVIDIA NIM Embedding + Reranker ──
-  # Always NVIDIA regardless of LLM_PROVIDER.
-  # Model IDs baked into vector_store.py and agent_graph.py.
-  # Listed here for visibility — changing them requires code changes.
-  # EMBED_MODEL: nvidia/llama-nemotron-embed-1b-v2  (2048-dim)
-  # RERANK_MODEL: nvidia/llama-nemotron-rerank-1b-v2
 
   # ── Context Window ──
   # Maximum document context chars passed to the LLM.
@@ -65,12 +59,13 @@ data:
   #   Gemini 2.5 Flash (1M tokens):                    up to ~750K chars
   #   Groq Qwen3-32B (32K tokens):                     do not exceed ~20K chars
   AGENT_MAX_CONTEXT_CHARS: "60000"
+  QUERY_TIMEOUT_S: "300"
 
   # ── Retrieval Thresholds ──
   # Tune after re-ingest without code changes.
   # AGENT_MIN_RERANK_SCORE: logit threshold for NVIDIA reranker (-5.0 default)
   # AGENT_MIN_VECTOR_SCORE: cosine similarity threshold for Qdrant (0.30 default)
-  AGENT_MIN_RERANK_SCORE: "-5.0"
+  AGENT_MIN_RERANK_SCORE: "-15.0"
   AGENT_MIN_VECTOR_SCORE: "0.30"
 
   # ── MinIO (Object Storage) ──
@@ -78,6 +73,10 @@ data:
   MINIO_BUCKET: "documind-uploads"
   MINIO_USE_SSL: "false"
   UPLOAD_FOLDER: "./uploads"
+
+  SENTENCE_TRANSFORMERS_HOME: "/model-cache"
+  HF_HOME: "/model-cache"
+  HF_HUB_OFFLINE: "1"
 
   # ── Observability ──
   LANGCHAIN_TRACING_V2: "true"

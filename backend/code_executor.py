@@ -126,31 +126,37 @@ class MathExecutor:
     # -----------------------------------------------------------------------
     def _extract_number_dense_context(self, context: str, max_chars: int = 6000) -> str:
         """
-        Score lines by numerical/financial density and return the highest-scoring
-        lines up to max_chars. Order within the result is highest-score first.
+        Filter out pure-narrative lines (no numbers and no table structure) and
+        return the remaining lines in their original document order up to
+        max_chars.
 
-        Used only by extract_variables_from_context — which builds a flat dict
-        where narrative order doesn't matter.
+        Lines are kept if they have any numeric content (score > 0) OR contain
+        table-structural characters (pipe '|' or separator patterns like '---').
+        Original ordering is preserved so that table header rows stay adjacent
+        to their data rows — critical for the extraction LLM to resolve which
+        column each value belongs to.
+
+        Used only by extract_variables_from_context — which needs column/row
+        anchoring to build a correctly-labelled variable dict.
         """
         lines = context.split('\n')
-        scored = []
+        kept_lines = []
+        total = 0
         for line in lines:
             numbers = re.findall(r'\d+\.?\d*', line)
             has_financial = bool(re.search(r'[\$€£%]|\d+[MBK]|\d+\.\d+', line))
             score = len(numbers) * 2 + (5 if has_financial else 0)
-            scored.append((score, line))
+            is_table_structure = bool('|' in line or re.search(r'[-=]{3,}', line))
 
-        scored.sort(key=lambda x: -x[0])
+            if score == 0 and not is_table_structure:
+                continue
 
-        result_lines = []
-        total = 0
-        for _, line in scored:
             if total + len(line) > max_chars:
                 break
-            result_lines.append(line)
+            kept_lines.append(line)
             total += len(line)
 
-        filtered = '\n'.join(result_lines)
+        filtered = '\n'.join(kept_lines)
         # Fallback: if filter produces nothing, use raw truncation
         return filtered if filtered.strip() else context[:max_chars]
 
@@ -207,10 +213,28 @@ Instructions:
 8. If a revision or restatement exists, extract BOTH original and restated values
    (e.g., original_revenue_millions and restated_revenue_millions)
 9. Return ONLY a valid Python dict — no duplicate keys
+10. TABLES — for any value extracted from a table with multiple columns:
+    - The variable name MUST encode BOTH the row label AND the column header
+    - Format: {{row_label}}_{{column_header}} in snake_case
+    - If the column header is a time period (Q1 2023, Q2 2024, FY2022, etc.),
+      always include it in the variable name
+    - NEVER create a bare metric name like `total_headcount` when multiple
+      time-period columns exist — each column value gets its own variable
+    - Example: a table row "TOTAL HEADCOUNT | 310 | 401" under columns
+      "Q1 2023 | Q2 2024" produces total_headcount_q1_2023 = 310 and
+      total_headcount_q2_2024 = 401, NOT total_headcount = 310
 
-Example with conflicting sources:
+Example 1 — conflicting sources:
 Text: "Doc A: Revenue Q1 $50M. Doc B (Restated): Revenue Q1 $45M"
 Output: {{"doc_a_q1_revenue_millions": 50, "doc_b_q1_revenue_millions_restated": 45}}
+
+Example 2 — table extraction:
+Text:
+  Department      | Q1 2023 | Q2 2024
+  Engineering     |   162   |   214
+  TOTAL HEADCOUNT |   310   |   401
+WRONG: {{"engineering_headcount": 162, "total_headcount": 310}}
+CORRECT: {{"engineering_q1_2023": 162, "engineering_q2_2024": 214, "total_headcount_q1_2023": 310, "total_headcount_q2_2024": 401}}
 
 Python dict:"""
 
@@ -347,7 +371,16 @@ Code:"""
     # -----------------------------------------------------------------------
     def validate_result(self, question: str, code: str, result: str, variables: Dict) -> Dict:
         """Sanity check the calculation result."""
-        validation_prompt = f"""Verify this calculation is correct.
+        validation_prompt = f"""Verify the ARITHMETIC in this code is correct.
+
+YOUR ROLE: You are a pure arithmetic checker. You verify that the code
+correctly implements the requested math operations given the variables it
+was provided. You do NOT have access to the source document and CANNOT
+judge whether the variable values themselves are correct.
+
+Do NOT assess whether the variable values are correct or match the source
+document — only assess whether the code correctly uses the variables it
+was given.
 
 Question: {question}
 Variables: {json.dumps(variables)}
@@ -355,12 +388,22 @@ Code: {code}
 Result: {result}
 
 Check:
-1. Is math correct?
-2. Does result answer the question?
-3. Is result just copying an input value (input-echo hallucination)?
+1. Is the arithmetic correct? (Do the math operations in the code produce
+   the printed result given the variable values?)
+2. Does the code correctly implement what the question asks arithmetically?
+   (e.g., if the question asks for a sum, does the code sum the right variables?
+   If it asks for a ratio, does it divide the right ones?)
+3. Is the result just copying an input value without performing any computation
+   (input-echo hallucination)?
+4. Are there variables that look suspicious — e.g., same metric name with
+   different time periods where the wrong period may have been selected?
+   If so, add a warning but do NOT set is_valid to false for this reason alone.
 
 Return JSON:
-{{"is_valid": true/false, "confidence": 0.0-1.0, "issues": [], "explanation": "..."}}
+{{"is_valid": true/false, "confidence": 0.0-1.0, "issues": [], "warnings": [], "explanation": "..."}}
+
+IMPORTANT: Set is_valid to false ONLY for checks 1-3. Check 4 produces
+warnings only — never invalidate a result because a variable VALUE looks wrong.
 
 JSON:"""
 

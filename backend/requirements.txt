@@ -57,6 +57,7 @@ google-api-python-client==2.188.0
 google-auth-httplib2==0.3.0
 google-auth==2.47.0
 google-genai==1.60.0
+langchain-google-genai
 googleapis-common-protos==1.72.0
 greenlet==3.3.1
 groq>=0.28.0
@@ -94,6 +95,7 @@ langchain-core==1.2.7
 langchain-experimental>=0.3.0,<1.0
 langchain-nvidia-ai-endpoints>=0.3.0
 langchain-openai==1.1.7
+langchain-groq
 langchain-text-splitters==1.1.0
 langchain==1.2.7
 langdetect==1.0.9
@@ -242,3 +244,4 @@ xxhash==3.6.0
 yarl==1.22.0
 zipp==3.23.0
 zstandard==0.25.0
+nameparser

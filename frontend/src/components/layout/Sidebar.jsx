@@ -1,13 +1,12 @@
 import { motion } from "framer-motion";
-import { LayoutDashboard, MessageSquare, FileText, Sparkles, Network, Settings } from "lucide-react";
+import { LayoutDashboard, FolderOpen, Sparkles, Network, Settings, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, shortcut: '⌘0' },
-  { id: 'chat', label: 'Chat', icon: MessageSquare, shortcut: '⌘1' },
-  { id: 'docs', label: 'Documents', icon: FileText, shortcut: '⌘2' },
-  { id: 'summary', label: 'Summary', icon: Sparkles, shortcut: '⌘3' },
-  { id: 'graph', label: 'Graph', icon: Network, shortcut: '⌘4' },
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, shortcut: '⌘1' },
+  { id: 'workspace', label: 'Workspace', icon: FolderOpen, shortcut: '⌘2' },
+  { id: 'graph', label: 'Graph', icon: Network, shortcut: '⌘3' },
+  { id: 'evaluation', label: 'Evaluation', icon: FlaskConical, shortcut: '⌘4' },
 ];
 
 export function Sidebar({ activeView, onViewChange }) {

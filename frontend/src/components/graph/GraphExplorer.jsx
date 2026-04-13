@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState, useEffect } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
+import { forceCollide } from 'd3-force-3d';
 import { GraphControls } from './GraphControls';
 import { CanvasStarfield } from './CanvasStarfield';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -18,45 +19,26 @@ export default function GraphExplorer() {
   // Minimal state — only for UI that truly needs re-render
   const [hoveredNodeDisplay, setHoveredNodeDisplay] = useState(null);
 
-  // --- Explosion effect (only for small graphs) ---
-  const hasExplodedRef = useRef(false);
+  // --- Initial fit view ---
+  const hasInitializedRef = useRef(false);
   useEffect(() => {
-    if (!loading && data.nodes.length > 0 && !hasExplodedRef.current && graphRef.current && tier) {
-      if (!tier.explosionEnabled) {
-        // Skip explosion, just fit view
-        setTimeout(() => {
-          graphRef.current?.zoomToFit(1000, 80);
-        }, 300);
-        hasExplodedRef.current = true;
-        return;
-      }
-
-      setTimeout(() => {
-        data.nodes.forEach((node) => {
-          const angle = Math.random() * Math.PI * 2;
-          const distance = 100 + Math.random() * 300;
-          const forceStrength = 20 + Math.random() * 30;
-          node.vx = Math.cos(angle) * forceStrength;
-          node.vy = Math.sin(angle) * forceStrength;
-          node.fx = Math.cos(angle) * distance;
-          node.fy = Math.sin(angle) * distance;
-        });
-
-        setTimeout(() => {
-          data.nodes.forEach((node) => {
-            node.fx = undefined;
-            node.fy = undefined;
-          });
-        }, 1500);
-
-        setTimeout(() => {
-          graphRef.current?.zoomToFit(2000, 100);
-        }, 2000);
-
-        hasExplodedRef.current = true;
-      }, 100);
+    if (!loading && data.nodes.length > 0 && !hasInitializedRef.current && graphRef.current) {
+      setTimeout(() => graphRef.current?.zoomToFit(1000, 80), 300);
+      hasInitializedRef.current = true;
     }
-  }, [loading, data.nodes, tier]);
+  }, [loading, data.nodes.length]);
+
+  // --- Configure d3 forces for readable, non-hairball layout ---
+  useEffect(() => {
+    if (!loading && data.nodes.length > 0 && graphRef.current) {
+      graphRef.current.d3Force('charge').strength(-120);
+      graphRef.current.d3Force('link').distance(80);
+      graphRef.current.d3Force('collision', forceCollide((node) => {
+        return Math.max(6, Math.sqrt(node.val || 1) * 4) + 4;
+      }));
+      graphRef.current.d3ReheatSimulation();
+    }
+  }, [loading, data.nodes.length]);
 
   // --- Freeze simulation after cooldown ---
   const onEngineStop = useCallback(() => {
@@ -145,7 +127,7 @@ export default function GraphExplorer() {
   }, []);
 
   const handleReset = useCallback(() => {
-    hasExplodedRef.current = false;
+    hasInitializedRef.current = false;
     refetch();
     setSearchTerm('');
     setSearchError(false);

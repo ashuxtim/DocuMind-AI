@@ -21,6 +21,10 @@ export const endpoints = {
   summarize: (filename) => `/summarize/${filename}`,
   graph: '/graph',
   dashboard: '/dashboard',
+  evaluateTrigger:  '/evaluate',
+  evaluateStatus:   '/evaluate/status',
+  evaluateResults:  '/evaluate/results',
+  evaluateHistory:  '/evaluate/history',
 };
 
 // Document Management APIs
@@ -56,5 +60,12 @@ export const getGraph = (limit) =>
 
 // Dashboard APIs
 export const getDashboard = () => api.get(endpoints.dashboard);
+
+// Evaluation APIs
+export const triggerEvaluation    = (regenerate = false) =>
+    api.post(`${endpoints.evaluateTrigger}?regenerate=${regenerate}`);
+export const getEvaluationStatus  = ()  => api.get(endpoints.evaluateStatus);
+export const getEvaluationResults = ()  => api.get(endpoints.evaluateResults);
+export const getEvaluationHistory = ()  => api.get(endpoints.evaluateHistory);
 
 export default api;

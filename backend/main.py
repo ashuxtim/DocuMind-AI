@@ -34,10 +34,10 @@ from vector_store import VectorStore
 from ingest import DocuMindIngest
 from knowledge_graph import KnowledgeBase
 from celery_app import celery_app
-from tasks import ingest_document_task
+from tasks import ingest_document_task, run_evaluation_task
 from state_manager import StateManager
 from langsmith import traceable
-from agent_graph import app_graph
+from agent_graph import app_graph, get_services
 from minio_storage import MinIOStorage
 
 # ---------------------------------------------------------------------------
@@ -360,7 +360,7 @@ async def get_file(filename: str):
     """Stream file from MinIO to browser via FastAPI proxy."""
     storage = get_storage()
     try:
-        response = storage.client.get_object(Bucket=storage.bucket, Key=filename)
+        response = storage.client.get_object(Bucket=storage.bucket, Key=f"documents/{filename}")
         mime = get_mime_type(filename)
         return StreamingResponse(
             response["Body"],
@@ -594,15 +594,21 @@ async def query_knowledge_base(request: QueryRequest):
             timeout=float(os.getenv("QUERY_TIMEOUT_S", "60")),
         )
 
+        raw_answer = final_state["generation"]
+        clean_answer = re.sub(
+            r'\[[^\]]*SYSTEM NOTE:[^\]]*TRUSTED CODE EXECUTION RESULT[^\]]*\]',
+            '',
+            raw_answer,
+        ).strip()
         return QueryResponse(
-            answer=final_state["generation"],
+            answer=clean_answer,
             context_used=final_state.get("sources", []),
             confidence=(
-                min(final_state.get("top_rerank_score", 0.5) * 0.7, 0.75)
+                max(0.0, min(final_state.get("top_rerank_score", 0.5) * 0.7, 0.75))
                 if final_state.get("has_contradiction", False)
-                else min(final_state.get("top_rerank_score", 0.5), 0.95)
+                else max(0.05, min(final_state.get("top_rerank_score", 0.5), 0.95))
                 if not final_state.get("audit_feedback", "")
-                else min(final_state.get("top_rerank_score", 0.5) * 0.5, 0.5)
+                else max(0.05, min(final_state.get("top_rerank_score", 0.5) * 0.5, 0.5))
             ),
             model="DocuMind-Agent-v2",
         )
@@ -620,25 +626,168 @@ async def query_knowledge_base(request: QueryRequest):
 @traceable(name="document_summary")
 async def summarize_document(filename: str):
     """
-    Fix 12 — Routes summarization through the full agent graph pipeline.
-    Summaries get fabrication detection, constraint checking, and LLM audit
-    — same quality guarantees as /query.
-    Replaces direct agent.llm.generate call which bypassed all audit stages.
-    """
-    print(f"📑 Generating Summary for: {filename}")
+    Fix 13 — Lightweight direct-LLM summary with 30-day Redis cache.
 
-    summary_request = QueryRequest(
-        question=(
-            f"Provide a comprehensive executive summary of '{filename}'. "
-            f"Include: key financial figures, main topics, any contradictions "
-            f"or inconsistencies found in the document, and strategic highlights."
-        ),
-        history=[],
-        selected_docs=[filename],
+    Pipeline:
+      1. Redis cache check  (documind:summary:{filename}, TTL 30 days)
+      2. Qdrant scroll      (scroll_by_filename — no query vector, O(log n))
+      3. Chunk selection    (first 3 + middle 3 + last 3, deduplicated)
+      4. Direct LLM call    (no agent graph, no audit, no reranking)
+      5. Redis cache write  (30-day TTL)
+
+    Returns 404 if the document has no indexed content.
+    Returns 500 (not 200) on any generation failure.
+    Cache is auto-invalidated by clear_document_state() on document delete
+    via scan_iter("*:{filename}*") which matches the key pattern.
+    """
+    SUMMARY_CACHE_KEY = f"documind:summary:{filename}"
+    SUMMARY_TTL       = 60 * 60 * 24 * 30   # 30 days
+
+    SUMMARY_SYSTEM_PROMPT = (
+        "You are summarizing a document for a user who has just opened it. "
+        "Write a structured executive summary covering: what the document is "
+        "about, key figures and data, important parties or entities mentioned, "
+        "any flagged risks or contradictions, and the main conclusions. "
+        "Be factual and concise. Only use information present in the provided "
+        "chunks. Do not fabricate anything."
     )
 
+    # --- 1. Redis cache check ---
     try:
-        response = await query_knowledge_base(summary_request)
-        return {"summary": response.answer}
+        cached = state_manager.redis_client.get(SUMMARY_CACHE_KEY)
+        if cached:
+            print(f"📑 Summary cache hit: {filename}")
+            return {"summary": cached}
     except Exception as e:
-        return {"summary": f"Summary Error: {str(e)}"}
+        print(f"   ⚠️ Summary cache read failed: {e} — proceeding without cache")
+
+    print(f"📑 Generating Summary for: {filename}")
+
+    try:
+        # --- 2. Qdrant scroll (no query vector) ---
+        vector_db = get_vector_db()
+        chunks = await asyncio.to_thread(vector_db.scroll_by_filename, filename)
+
+        if not chunks:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": f"No content found for this document: '{filename}'"},
+            )
+
+        # --- 3. Chunk selection: first 3 + middle 3 + last 3 (deduplicated) ---
+        n = len(chunks)
+        mid = n // 2
+        # Build ordered index list, deduplicate while preserving order
+        candidate_indices = (
+            list(range(min(3, n)))
+            + [max(0, mid - 1), mid, min(n - 1, mid + 1)]
+            + list(range(max(0, n - 3), n))
+        )
+        seen = set()
+        selected_indices = []
+        for i in candidate_indices:
+            if i not in seen:
+                seen.add(i)
+                selected_indices.append(i)
+
+        selected_texts = [chunks[i]["text"] for i in sorted(selected_indices)]
+        joined_chunk_text = "\n\n---\n\n".join(selected_texts)
+
+        # --- 4. Direct LLM call ---
+        svc = get_services()
+        llm = svc["llm"]
+
+        user_prompt = (
+            f"Document: {filename}\n\n"
+            f"Chunks:\n{joined_chunk_text}\n\n"
+            f"Summary:"
+        )
+
+        summary_text = await asyncio.to_thread(
+            llm.generate, user_prompt, SUMMARY_SYSTEM_PROMPT
+        )
+
+        # --- 5. Write to Redis cache ---
+        try:
+            state_manager.redis_client.setex(SUMMARY_CACHE_KEY, SUMMARY_TTL, summary_text)
+        except Exception as e:
+            print(f"   ⚠️ Summary cache write failed: {e} — returning result anyway")
+
+        return {"summary": summary_text}
+
+    except Exception as e:
+        print(f"❌ Summary generation failed for '{filename}': {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Summary generation failed: {str(e)}"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Evaluation endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/evaluate")
+async def trigger_evaluation(regenerate: bool = False):
+    """
+    Dispatch a RAGAS evaluation run as a Celery task.
+    Returns 409 if an evaluation is already in progress.
+    """
+    existing = state_manager.redis_client.get("documind:eval_status")
+    if existing in ("running", "queued"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Evaluation already {existing} — wait for it to complete."
+        )
+    task = run_evaluation_task.delay(regenerate=regenerate)
+    state_manager.redis_client.set("documind:eval_status", "queued", ex=3600)
+    state_manager.redis_client.set("documind:eval_last_task_id", task.id, ex=86400)
+    return {
+        "message": "Evaluation started",
+        "task_id": task.id,
+        "status":  "queued",
+    }
+
+
+@app.get("/evaluate/status")
+async def get_evaluation_status():
+    """Return current evaluation status from Redis plus Celery task state."""
+    status = state_manager.redis_client.get("documind:eval_status") or "idle"
+    last_task_id = state_manager.redis_client.get("documind:eval_last_task_id")
+    response = {"status": status, "last_task_id": last_task_id}
+    if last_task_id:
+        task_result = AsyncResult(last_task_id, app=celery_app)
+        try:
+            response["celery_state"] = task_result.status
+        except Exception:
+            response["celery_state"] = "UNKNOWN"
+    return response
+
+
+@app.get("/evaluate/results")
+async def get_evaluation_results():
+    """Return the latest RAGAS evaluation results from MinIO."""
+    minio = get_storage()
+    data = minio.download_json("evaluations/latest.json")
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No evaluation results found. Run /evaluate first."
+        )
+    return data
+
+
+@app.get("/evaluate/history")
+async def get_evaluation_history():
+    """
+    List all historical evaluation runs stored in MinIO.
+    Excludes latest.json. Sorted newest first by last_modified.
+    """
+    minio = get_storage()
+    objects = minio.list_prefix("evaluations/")
+    history = [
+        obj for obj in objects
+        if obj["key"] != "evaluations/latest.json"
+    ]
+    history.sort(key=lambda x: x["last_modified"], reverse=True)
+    return {"runs": history, "total": len(history)}

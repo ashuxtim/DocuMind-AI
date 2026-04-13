@@ -94,3 +94,14 @@ k8s/library/
 k8s/migration-plan.md
 merge_code.py
 get-docker.sh
+# NIM benchmark scripts and results
+nim_role_benchmark/
+k8s/scripts/discover_models.sh
+k8s/scripts/nim_results_*.csv
+k8s/scripts/test_groq.py
+k8s/scripts/test_nim.py
+
+# Working notes
+next.md
+# Codex CLI config
+.codex

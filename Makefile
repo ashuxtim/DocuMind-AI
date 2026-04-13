@@ -8,14 +8,35 @@ ENV_FILE      := ./backend/.env
 # Run this once on fresh cluster and any time you change .env.
 # Idempotent — safe to run multiple times.
 secrets:
-	@echo "🔑 Syncing $(ENV_FILE) → K8s secret documind-secrets..."
+	@echo "🔑 Pushing API keys from $(ENV_FILE) → K8s secret documind-secrets..."
 	@if [ ! -f $(ENV_FILE) ]; then \
 		echo "❌ $(ENV_FILE) not found — create it first"; exit 1; \
 	fi
-	@kubectl create secret generic documind-secrets \
-		--from-env-file=$(ENV_FILE) \
-		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "✅ Secret synced"
+	@NVIDIA_API_KEY=$$(grep '^NVIDIA_API_KEY=' $(ENV_FILE) | cut -d= -f2-); \
+		LLAMA_CLOUD_API_KEY=$$(grep '^LLAMA_CLOUD_API_KEY=' $(ENV_FILE) | cut -d= -f2-); \
+		GROQ_API_KEY=$$(grep '^GROQ_API_KEY=' $(ENV_FILE) | cut -d= -f2-); \
+		GEMINI_API_KEY=$$(grep '^GEMINI_API_KEY=' $(ENV_FILE) | cut -d= -f2-); \
+		OPENAI_API_KEY=$$(grep '^OPENAI_API_KEY=' $(ENV_FILE) | cut -d= -f2-); \
+		ANTHROPIC_API_KEY=$$(grep '^ANTHROPIC_API_KEY=' $(ENV_FILE) | cut -d= -f2-); \
+		NEO4J_PASSWORD=$$(grep '^NEO4J_PASSWORD=' $(ENV_FILE) | cut -d= -f2-); \
+		LANGCHAIN_API_KEY=$$(grep '^LANGCHAIN_API_KEY=' $(ENV_FILE) | cut -d= -f2-); \
+		MINIO_ACCESS_KEY=$$(grep '^MINIO_ACCESS_KEY=' $(ENV_FILE) | cut -d= -f2-); \
+		MINIO_SECRET_KEY=$$(grep '^MINIO_SECRET_KEY=' $(ENV_FILE) | cut -d= -f2-); \
+		HF_TOKEN=$$(grep '^HF_TOKEN=' $(ENV_FILE) | cut -d= -f2-); \
+		kubectl create secret generic documind-secrets \
+			--from-literal=NVIDIA_API_KEY="$$NVIDIA_API_KEY" \
+			--from-literal=LLAMA_CLOUD_API_KEY="$$LLAMA_CLOUD_API_KEY" \
+			$$([ -n "$$GROQ_API_KEY" ] && echo "--from-literal=GROQ_API_KEY=$$GROQ_API_KEY") \
+			$$([ -n "$$GEMINI_API_KEY" ] && echo "--from-literal=GEMINI_API_KEY=$$GEMINI_API_KEY") \
+			$$([ -n "$$OPENAI_API_KEY" ] && echo "--from-literal=OPENAI_API_KEY=$$OPENAI_API_KEY") \
+			$$([ -n "$$ANTHROPIC_API_KEY" ] && echo "--from-literal=ANTHROPIC_API_KEY=$$ANTHROPIC_API_KEY") \
+			--from-literal=NEO4J_PASSWORD="$$NEO4J_PASSWORD" \
+			--from-literal=LANGCHAIN_API_KEY="$$LANGCHAIN_API_KEY" \
+			--from-literal=MINIO_ACCESS_KEY="$$MINIO_ACCESS_KEY" \
+			--from-literal=MINIO_SECRET_KEY="$$MINIO_SECRET_KEY" \
+			--from-literal=HF_TOKEN="$$HF_TOKEN" \
+			--dry-run=client -o yaml | kubectl apply -f -
+	@echo "✅ Secret synced (API keys only — model config stays in ConfigMap)"
 
 minio-secret:
 	@echo "🔑 Creating minio-credentials secret..."
@@ -44,6 +65,17 @@ deploy:
 	@kubectl rollout status deployment fastapi worker
 	@echo "✅ Deployed"
 
+# ── Apply configmap changes + restart pods ───────────────────────────────────
+# Run this after editing documind-configmap.yaml.
+# ConfigMap changes do NOT hot-reload into running pods — restart is required.
+apply-config:
+	@echo "📋 Applying configmap changes..."
+	@kubectl apply -f k8s/base/documind-configmap.yaml
+	@echo "🔄 Restarting pods to pick up new config..."
+	@kubectl rollout restart deployment fastapi worker
+	@kubectl rollout status deployment fastapi worker
+	@echo "✅ Configmap applied and pods restarted"
+
 # ── Build + Deploy ──────────────────────────────────────────────────────
 backend: build deploy
 
@@ -55,7 +87,7 @@ setup: secrets minio-secret
 	@echo "✅ Stack deployed — check logs with: make check-llm"
 
 # ── Sync secrets + restart (run after changing .env) ────────────────────
-fresh: secrets deploy
+fresh: secrets build deploy
 	@echo "✅ Secrets synced + pods restarted"
 
 # ── Status ──────────────────────────────────────────────────────────────
@@ -75,7 +107,8 @@ logs-worker:
 	@kubectl logs deployment/worker --follow | grep -v "/health" | grep -v "/status"
 
 logs-all:
-	@stern . --namespace default | grep -vE "GET /(health|status)"
+	@stern . --namespace default | grep -vE \
+		"GET /health|GET /dashboard|GET /documents|GET /graph|GET /evaluate/(status|results|history)|Batches:|Background saving|BGSAVE|DB saved on disk|Fork CoW|changes in [0-9]+ seconds|Received notification from DBMS"
 
 # ── LLM check ───────────────────────────────────────────────────────────
 check-llm:
@@ -84,9 +117,10 @@ check-llm:
 # ── Wipe individual stores ───────────────────────────────────────────────
 wipe-qdrant:
 	@echo "🗑️  Wiping Qdrant collection..."
-	@QDRANT_PORT=$$(grep '^QDRANT_PORT=' $(ENV_FILE) | cut -d= -f2- | tr -d '[:space:]'); \
+	@QDRANT_PORT=$$(kubectl get configmap documind-config \
+		-o jsonpath='{.data.QDRANT_PORT}' 2>/dev/null | tr -d '[:space:]'); \
 		if [ -z "$$QDRANT_PORT" ]; then \
-			echo "❌ QDRANT_PORT not found in $(ENV_FILE)"; exit 1; \
+			echo "❌ QDRANT_PORT not found in configmap documind-config"; exit 1; \
 		fi; \
 		kubectl port-forward svc/qdrant-service $$QDRANT_PORT:$$QDRANT_PORT & \
 		PF_PID=$$!; \

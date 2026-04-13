@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import tempfile
 from contextlib import contextmanager
@@ -155,7 +156,7 @@ class MinIOStorage:
         self.client.upload_fileobj(
             file_obj,
             self.bucket,
-            filename,
+            f"documents/{filename}",
             ExtraArgs={"ContentType": content_type},
         )
         return filename
@@ -185,7 +186,7 @@ class MinIOStorage:
             dir=_TEMP_DIR,
         )
         try:
-            self.client.download_fileobj(self.bucket, filename, tmp)
+            self.client.download_fileobj(self.bucket, self._doc_key(filename), tmp)
             tmp.close()
             yield tmp.name
         except Exception:
@@ -197,13 +198,16 @@ class MinIOStorage:
             except FileNotFoundError:
                 pass  # already gone, nothing to do
 
+    def _doc_key(self, filename: str) -> str:
+        return f"documents/{filename}"
+
     # -----------------------------------------------------------------------
     # delete_file
     # -----------------------------------------------------------------------
     def delete_file(self, filename: str) -> None:
         """Delete a file from MinIO."""
         self._ensure_bucket()
-        self.client.delete_object(Bucket=self.bucket, Key=filename)
+        self.client.delete_object(Bucket=self.bucket, Key=self._doc_key(filename))
 
     # -----------------------------------------------------------------------
     # file_exists
@@ -212,7 +216,7 @@ class MinIOStorage:
         """Return True if the object exists in the bucket."""
         self._ensure_bucket()
         try:
-            self.client.head_object(Bucket=self.bucket, Key=filename)
+            self.client.head_object(Bucket=self.bucket, Key=self._doc_key(filename))
             return True
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":
@@ -235,7 +239,7 @@ class MinIOStorage:
         self._ensure_bucket()
 
         result: list[dict] = []
-        kwargs: dict = {"Bucket": self.bucket}
+        kwargs: dict = {"Bucket": self.bucket, "Prefix": "documents/"}
 
         while True:
             try:
@@ -253,8 +257,11 @@ class MinIOStorage:
                 break
 
             for obj in response.get("Contents", []):
+                key = obj["Key"]
+                filename = key[len("documents/"):] if key.startswith("documents/") else key
+                
                 result.append({
-                    "filename":      obj["Key"],
+                    "filename":      filename,
                     "size":          obj["Size"],
                     "last_modified": obj["LastModified"].isoformat(),
                 })
@@ -277,7 +284,7 @@ class MinIOStorage:
         """
         self._ensure_bucket()
         try:
-            resp = self.client.head_object(Bucket=self.bucket, Key=filename)
+            resp = self.client.head_object(Bucket=self.bucket, Key=self._doc_key(filename))
             return resp["ContentLength"]
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code")
@@ -289,3 +296,76 @@ class MinIOStorage:
                 extra={"bucket": self.bucket, "error": str(e)},
             )
             raise
+
+    # -----------------------------------------------------------------------
+    # upload_json
+    # -----------------------------------------------------------------------
+    def upload_json(self, key: str, data: dict) -> None:
+        """Serialize data to JSON and upload to the bucket under key."""
+        self._ensure_bucket()
+        body = json.dumps(data).encode("utf-8")
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+        )
+
+    # -----------------------------------------------------------------------
+    # download_json
+    # -----------------------------------------------------------------------
+    def download_json(self, key: str) -> dict | None:
+        """
+        Download and parse a JSON object from the bucket.
+        Returns None if the key does not exist (404 / NoSuchKey).
+        Re-raises on all other ClientErrors.
+        """
+        self._ensure_bucket()
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=key)
+            body = response["Body"].read()
+            return json.loads(body)
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code in ("404", "NoSuchKey"):
+                return None
+            raise
+
+    # -----------------------------------------------------------------------
+    # list_prefix
+    # -----------------------------------------------------------------------
+    def list_prefix(self, prefix: str) -> list[dict]:
+        """
+        List all objects whose key starts with prefix.
+        Returns a list of dicts with keys: key (str), size (int),
+        last_modified (str isoformat). Returns [] if none found.
+        """
+        self._ensure_bucket()
+        result: list[dict] = []
+        kwargs: dict = {"Bucket": self.bucket, "Prefix": prefix}
+
+        while True:
+            try:
+                response = self.client.list_objects_v2(**kwargs)
+            except Exception as e:
+                logger.error(
+                    "MinIO list_prefix error %s for prefix '%s'",
+                    type(e).__name__,
+                    prefix,
+                    extra={"bucket": self.bucket, "error": str(e)},
+                )
+                break
+
+            for obj in response.get("Contents", []):
+                result.append({
+                    "key":           obj["Key"],
+                    "size":          obj["Size"],
+                    "last_modified": obj["LastModified"].isoformat(),
+                })
+
+            if response.get("IsTruncated"):
+                kwargs["ContinuationToken"] = response["NextContinuationToken"]
+            else:
+                break
+
+        return result
