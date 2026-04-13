@@ -1,70 +1,79 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { MultiGraph } from 'graphology';
+import { assign as forceAtlas2Assign } from 'graphology-layout-forceatlas2';
 import { getGraph } from '@/lib/api';
-import { getGraphTier } from '@/utils/graphConfig';
 
-/**
- * Hook for fetching and processing graph data.
- * Computes node degrees, sizes, and determines the performance tier.
- *
- * @param {object} options
- * @param {number} [options.limit=2000] - Max edges to request from backend
- * @returns {{ data, loading, tier, totalCount, refetch }}
- */
-export function useGraphData({ limit = 2000 } = {}) {
-    const [data, setData] = useState({ nodes: [], links: [] });
-    const [loading, setLoading] = useState(true);
-    const [totalCount, setTotalCount] = useState(0);
-    const [tier, setTier] = useState(null);
-    const prevHashRef = useRef(null);
+const COLOR_MAP = {
+  Person: '#34D399',
+  Organization: '#FBBF24',
+  Statute: '#A78BFA',
+  Date: '#22D3EE',
+  Document: '#F472B6',
+  Entity: '#94A3B8',
+};
 
-    const fetchGraph = useCallback(async () => {
-        setLoading(true);
+function nodeSize(degree) {
+  return Math.max(4, Math.min(20, 4 + Math.log(degree + 1) * 4));
+}
 
-        try {
-            const response = await getGraph(limit);
-            const graphData = response.data;
+export function useGraphData() {
+  const [graph, setGraph] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [nodeCount, setNodeCount] = useState(0);
+  const [linkCount, setLinkCount] = useState(0);
 
-            // Use server-side degree if available, otherwise compute client-side
-            const hasServerDegree = graphData.nodes.length > 0 && graphData.nodes[0].degree !== undefined;
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await getGraph(2000);
+      const { nodes, links } = res.data;
 
-            if (!hasServerDegree) {
-                const nodeDegrees = {};
-                graphData.links.forEach((link) => {
-                    nodeDegrees[link.source] = (nodeDegrees[link.source] || 0) + 1;
-                    nodeDegrees[link.target] = (nodeDegrees[link.target] || 0) + 1;
-                });
-                graphData.nodes.forEach((node) => {
-                    node.connections = nodeDegrees[node.id] || 1;
-                    node.val = Math.max(2, Math.log2((nodeDegrees[node.id] || 1) + 1) * 4);
-                });
-            } else {
-                graphData.nodes.forEach((node) => {
-                    node.connections = node.degree || 1;
-                    node.val = Math.max(2, Math.log2((node.degree || 1) + 1) * 4);
-                });
-            }
+      const g = new MultiGraph();
 
-            // Determine performance tier
-            const currentTier = getGraphTier(graphData.nodes.length);
+      nodes.forEach((node) => {
+        g.addNode(node.id, {
+          x: Math.random() * 1000 - 500,
+          y: Math.random() * 1000 - 500,
+          size: nodeSize(node.degree || 1),
+          color: COLOR_MAP[node.group] ?? COLOR_MAP.Entity,
+          label: node.id,
+          group: node.group,
+        });
+      });
 
-            // Stable reference check — don't re-set if data hasn't changed
-            const hash = graphData.nodes.length + ':' + graphData.links.length;
-            if (hash !== prevHashRef.current) {
-                prevHashRef.current = hash;
-                setData(graphData);
-                setTier(currentTier);
-                setTotalCount(graphData.total || graphData.nodes.length);
-            }
-        } catch (error) {
-            console.error('Failed to fetch graph', error);
-        } finally {
-            setLoading(false);
+      links.forEach((link) => {
+        if (g.hasNode(link.source) && g.hasNode(link.target)) {
+          g.addEdge(link.source, link.target, {
+            label: link.label ?? '',
+            color: 'rgba(148, 163, 184, 0.4)',
+            size: 1,
+          });
         }
-    }, [limit]);
+      });
 
-    useEffect(() => {
-        fetchGraph();
-    }, [fetchGraph]);
+      // Run ForceAtlas2 synchronously before sigma mounts so nodes have real positions
+      if (g.order > 0) {
+        forceAtlas2Assign(g, {
+          iterations: 100,
+          settings: { gravity: 1, scalingRatio: 2 },
+        });
+      }
 
-    return { data, loading, tier, totalCount, refetch: fetchGraph };
+      setGraph(g);
+      setNodeCount(g.order);
+      setLinkCount(g.size);
+    } catch (err) {
+      setError(err?.message ?? 'Failed to load graph');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { graph, loading, error, refetch: fetchData, nodeCount, linkCount };
 }
