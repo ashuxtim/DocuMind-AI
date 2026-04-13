@@ -13,7 +13,7 @@ const COLOR_MAP = {
 };
 
 function nodeSize(degree) {
-  return Math.max(4, Math.min(20, 4 + Math.log(degree + 1) * 4));
+  return Math.max(5, Math.min(30, 5 + Math.log(degree + 1) * 6));
 }
 
 export function useGraphData() {
@@ -56,8 +56,17 @@ export function useGraphData() {
       // Run ForceAtlas2 synchronously before sigma mounts so nodes have real positions
       if (g.order > 0) {
         forceAtlas2Assign(g, {
-          iterations: 100,
-          settings: { gravity: 1, scalingRatio: 2 },
+          iterations: 500,
+          settings: {
+            gravity: 0.05,
+            scalingRatio: 10,
+            strongGravityMode: false,
+            barnesHutOptimize: true,
+            barnesHutTheta: 0.5,
+            adjustSizes: true,
+            linLogMode: false,
+            outboundAttractionDistribution: true,
+          },
         });
       }
 

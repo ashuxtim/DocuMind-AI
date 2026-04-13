@@ -15,6 +15,7 @@ const SIGMA_SETTINGS = {
   edgeLabelColor: { color: '#94A3B8' },
   minCameraRatio: 0.05,
   maxCameraRatio: 5,
+  edgeLabelThreshold: 8,
 };
 
 const GraphExplorer = forwardRef(function GraphExplorer({ graph, search }, ref) {
@@ -52,6 +53,33 @@ const GraphExplorer = forwardRef(function GraphExplorer({ graph, search }, ref) 
     });
 
     sigmaRef.current = sigma;
+
+    // Store the original label once so it is never lost during LOD updates
+    graph.forEachNode((nodeId, attrs) => {
+      graph.setNodeAttribute(nodeId, '_label', attrs.label);
+    });
+
+    // Zoom-based label level-of-detail: higher ratio = more zoomed out
+    const handleCameraUpdate = () => {
+      const ratio = sigma.getCamera().ratio;
+      graph.forEachNode((nodeId, attrs) => {
+        if (ratio > 1.5) {
+          // Very zoomed out — only hub nodes (size >= 18)
+          graph.setNodeAttribute(nodeId, 'label', attrs.size >= 18 ? attrs._label : '');
+        } else if (ratio > 0.6) {
+          // Mid zoom — medium and large nodes (size >= 10)
+          graph.setNodeAttribute(nodeId, 'label', attrs.size >= 10 ? attrs._label : '');
+        } else {
+          // Zoomed in — show all labels
+          graph.setNodeAttribute(nodeId, 'label', attrs._label);
+        }
+      });
+      sigma.refresh();
+    };
+
+    sigma.getCamera().on('updated', handleCameraUpdate);
+    // Apply correct labels for the initial zoom level immediately
+    sigma.getCamera().emit('updated');
 
     // Hover: highlight neighborhood, dim the rest
     sigma.on('enterNode', ({ node }) => {
