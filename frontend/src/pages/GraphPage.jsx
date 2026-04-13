@@ -1,10 +1,13 @@
 import { useState, useRef, useCallback } from 'react';
-import { Network, ZoomIn, ZoomOut, Maximize2, RefreshCw } from 'lucide-react';
+import { Network, ZoomIn, ZoomOut, Maximize2, RefreshCw, Filter } from 'lucide-react';
 import { useGraphData } from '@/hooks/useGraphData';
 import GraphExplorer from '@/components/graph/GraphExplorer';
+import { GraphFilterPanel } from '@/components/graph/GraphFilterPanel';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Badge } from '@/ui/badge';
+
+const ALL_TYPES = ['Person', 'Organization', 'Statute', 'Date', 'Document', 'Entity'];
 
 const NODE_COLORS = [
   { label: 'Person', color: '#34D399' },
@@ -19,6 +22,9 @@ export function GraphPage() {
   const { graph, loading, error, refetch, nodeCount, linkCount } = useGraphData();
   const [searchValue, setSearchValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [activeTypes, setActiveTypes] = useState(new Set(ALL_TYPES));
+  const [typeCounts, setTypeCounts] = useState({});
   const explorerRef = useRef(null);
 
   const handleSearchKeyDown = useCallback(
@@ -27,6 +33,32 @@ export function GraphPage() {
     },
     [searchValue],
   );
+
+  const handleToggleType = useCallback((type) => {
+    setActiveTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        if (next.size === 1) return prev; // never hide the last type
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleShowAll = useCallback(() => {
+    setActiveTypes(new Set(ALL_TYPES));
+  }, []);
+
+  const handleHideAll = useCallback(() => {
+    // Keep only the type with the most nodes
+    const mostConnected =
+      Object.entries(typeCounts).sort(([, a], [, b]) => b - a)[0]?.[0] ?? 'Entity';
+    setActiveTypes(new Set([mostConnected]));
+  }, [typeCounts]);
+
+  const hiddenCount = ALL_TYPES.length - activeTypes.size;
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -79,6 +111,26 @@ export function GraphPage() {
               onChange={(e) => setSearchValue(e.target.value)}
               onKeyDown={handleSearchKeyDown}
             />
+
+            {/* Filter panel toggle */}
+            <div className="relative">
+              <Button
+                variant={filterOpen ? 'default' : 'outline'}
+                size="icon"
+                className="h-7 w-7"
+                title="Filter by type"
+                onClick={() => setFilterOpen((o) => !o)}
+              >
+                <Filter className="w-3.5 h-3.5" />
+              </Button>
+              {hiddenCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex items-center justify-center
+                                 w-3.5 h-3.5 rounded-full bg-destructive text-[9px] font-bold
+                                 text-destructive-foreground leading-none pointer-events-none">
+                  {hiddenCount}
+                </span>
+              )}
+            </div>
 
             {/* Camera controls */}
             <Button
@@ -142,6 +194,17 @@ export function GraphPage() {
           </div>
         )}
 
+        {/* Filter panel — positioned over the graph, slides in from the left */}
+        <GraphFilterPanel
+          isOpen={filterOpen}
+          onClose={() => setFilterOpen(false)}
+          activeTypes={activeTypes}
+          onToggleType={handleToggleType}
+          onShowAll={handleShowAll}
+          onHideAll={handleHideAll}
+          typeCounts={typeCounts}
+        />
+
         {/* Sigma needs a real pixel height — ensure parent chain has h-full */}
         {graph && !loading && !error && (
           <div className="w-full h-full">
@@ -149,6 +212,8 @@ export function GraphPage() {
               ref={explorerRef}
               graph={graph}
               search={committedSearch}
+              activeTypes={activeTypes}
+              onTypeCounts={setTypeCounts}
             />
           </div>
         )}

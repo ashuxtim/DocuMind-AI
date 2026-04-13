@@ -1,4 +1,4 @@
-import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { Sigma } from 'sigma';
 import { EdgeArrowProgram } from 'sigma/rendering';
 
@@ -18,10 +18,16 @@ const SIGMA_SETTINGS = {
   edgeLabelThreshold: 8,
 };
 
-const GraphExplorer = forwardRef(function GraphExplorer({ graph, search }, ref) {
+const GraphExplorer = forwardRef(function GraphExplorer(
+  { graph, search, activeTypes, onTypeCounts },
+  ref,
+) {
   const containerRef = useRef(null);
   const sigmaRef = useRef(null);
   const hoveredNodeRef = useRef(null);
+  // Keep a ref so mount-time reducers always see the latest activeTypes
+  // without needing to remount sigma when the filter changes.
+  const activeTypesRef = useRef(activeTypes);
 
   // Mount sigma after the container div is in the DOM
   useEffect(() => {
@@ -30,6 +36,11 @@ const GraphExplorer = forwardRef(function GraphExplorer({ graph, search }, ref) 
     const sigma = new Sigma(graph, containerRef.current, {
       ...SIGMA_SETTINGS,
       nodeReducer: (node, data) => {
+        // Filter: hide nodes whose type is toggled off
+        if (activeTypesRef.current && !activeTypesRef.current.has(data.group)) {
+          return { ...data, hidden: true };
+        }
+        // Hover: highlight hovered node and neighbours, dim everything else
         const hovered = hoveredNodeRef.current;
         if (!hovered) return data;
         if (node === hovered) return { ...data, highlighted: true, zIndex: 1 };
@@ -43,6 +54,18 @@ const GraphExplorer = forwardRef(function GraphExplorer({ graph, search }, ref) 
         return { ...data, color: dimColor, label: '', size: data.size * 0.6 };
       },
       edgeReducer: (edge, data) => {
+        // Filter: hide edges where either endpoint type is toggled off
+        if (activeTypesRef.current) {
+          const srcGroup = graph.getNodeAttribute(graph.source(edge), 'group');
+          const tgtGroup = graph.getNodeAttribute(graph.target(edge), 'group');
+          if (
+            !activeTypesRef.current.has(srcGroup) ||
+            !activeTypesRef.current.has(tgtGroup)
+          ) {
+            return { ...data, hidden: true };
+          }
+        }
+        // Hover: hide edges not connected to the hovered node
         const hovered = hoveredNodeRef.current;
         if (!hovered) return data;
         const source = graph.source(edge);
@@ -58,6 +81,13 @@ const GraphExplorer = forwardRef(function GraphExplorer({ graph, search }, ref) 
     graph.forEachNode((nodeId, attrs) => {
       graph.setNodeAttribute(nodeId, '_label', attrs.label);
     });
+
+    // Report per-type node counts to the parent once after mounting
+    const counts = {};
+    graph.forEachNode((id, attrs) => {
+      counts[attrs.group] = (counts[attrs.group] || 0) + 1;
+    });
+    onTypeCounts?.(counts);
 
     // Zoom-based label level-of-detail: higher ratio = more zoomed out
     const handleCameraUpdate = () => {
@@ -129,6 +159,12 @@ const GraphExplorer = forwardRef(function GraphExplorer({ graph, search }, ref) 
       }
     }
   }, [search, graph]);
+
+  // Sync activeTypes ref and re-render sigma whenever the filter set changes
+  useEffect(() => {
+    activeTypesRef.current = activeTypes;
+    if (sigmaRef.current) sigmaRef.current.refresh();
+  }, [activeTypes]);
 
   // Expose camera controls to parent via ref
   useImperativeHandle(ref, () => ({
