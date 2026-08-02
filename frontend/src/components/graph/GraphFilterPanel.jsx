@@ -24,27 +24,27 @@ export function GraphFilterPanel({
   return (
     <motion.div
       initial={false}
-      animate={{ x: isOpen ? 0 : -220 }}
+      animate={{ x: isOpen ? 0 : -260 }}
       transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-      className="absolute top-0 left-0 h-full z-20 flex flex-col"
-      style={{ width: 220 }}
+      className="absolute top-16 left-3 bottom-14 z-20 flex flex-col"
+      style={{ width: 240 }}
     >
-      <div className="h-full flex flex-col bg-slate-900/95 backdrop-blur-sm border-r border-slate-700/50 overflow-hidden">
+      <div className="h-full flex flex-col bg-[#101018]/95 backdrop-blur-md border border-[#2a2a3a] rounded-xl shadow-glass overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-700/50 flex-none">
-          <span className="text-xs font-semibold text-slate-200 tracking-wide uppercase">
+        <div className="flex items-center justify-between px-3.5 py-3 border-b border-[#2a2a3a] flex-none">
+          <span className="text-xs font-semibold text-[#e4e4ed] tracking-wider uppercase font-sans">
             Filter by Type
           </span>
           <button
             onClick={onClose}
-            className="flex items-center justify-center w-5 h-5 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 transition-colors"
+            className="flex items-center justify-center w-6 h-6 rounded-lg text-[#8888a0] hover:text-[#e4e4ed] hover:bg-[#1c1c28] transition-colors"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Type rows */}
-        <div className="flex-1 overflow-y-auto py-1">
+        <div className="flex-1 overflow-y-auto py-1 scrollbar-thin">
           {ALL_TYPES.map((type) => {
             const active = activeTypes.has(type);
             const count = typeCounts[type] ?? 0;
@@ -52,46 +52,46 @@ export function GraphFilterPanel({
               <button
                 key={type}
                 onClick={() => onToggleType(type)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-left transition-opacity hover:bg-slate-700/40"
+                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left transition-all hover:bg-[#1c1c28]"
                 style={{ opacity: active ? 1 : 0.4 }}
               >
                 {/* Colored dot */}
                 <span
-                  className="flex-none w-2.5 h-2.5 rounded-full"
+                  className="flex-none w-2.5 h-2.5 rounded-full shadow-sm"
                   style={{ backgroundColor: TYPE_COLORS[type] }}
                 />
                 {/* Type name */}
-                <span className="flex-1 text-xs text-slate-200 font-medium">
+                <span className="flex-1 text-xs text-[#e4e4ed] font-sans font-medium">
                   {type}
                 </span>
                 {/* Count badge */}
-                <span className="flex-none text-xs text-slate-400 tabular-nums">
+                <span className="flex-none text-xs text-[#8888a0] font-mono tabular-nums">
                   {count.toLocaleString()}
                 </span>
                 {/* Active indicator */}
                 <span
-                  className="flex-none w-1.5 h-1.5 rounded-full transition-colors"
-                  style={{ backgroundColor: active ? TYPE_COLORS[type] : 'transparent',
-                           boxShadow: active ? `0 0 4px ${TYPE_COLORS[type]}` : 'none' }}
+                  className="flex-none w-1.5 h-1.5 rounded-full transition-all"
+                  style={{
+                    backgroundColor: active ? TYPE_COLORS[type] : 'transparent',
+                    boxShadow: active ? `0 0 6px ${TYPE_COLORS[type]}` : 'none',
+                  }}
                 />
               </button>
             );
           })}
         </div>
 
-        {/* Divider + action buttons */}
-        <div className="flex-none border-t border-slate-700/50 p-2.5 flex flex-col gap-1.5">
+        {/* Action buttons */}
+        <div className="flex-none border-t border-[#2a2a3a] p-3 flex flex-col gap-2 bg-[#0a0a10]/60">
           <button
             onClick={onShowAll}
-            className="w-full text-xs font-medium text-slate-200 py-1.5 px-3 rounded
-                       bg-slate-700/60 hover:bg-slate-600/60 transition-colors text-center"
+            className="w-full text-xs font-sans font-medium text-[#e4e4ed] py-2 px-3 rounded-lg bg-[#16161f] border border-[#2a2a3a] hover:bg-[#1c1c28] hover:border-[#7c3aed]/50 transition-all text-center shadow-sm"
           >
             Show All
           </button>
           <button
             onClick={onHideAll}
-            className="w-full text-xs font-medium text-slate-400 py-1.5 px-3 rounded
-                       hover:bg-slate-700/40 hover:text-slate-200 transition-colors text-center"
+            className="w-full text-xs font-sans font-medium text-[#8888a0] py-2 px-3 rounded-lg hover:bg-[#1c1c28] hover:text-[#e4e4ed] transition-all text-center"
           >
             Hide All
           </button>
@@ -100,3 +100,4 @@ export function GraphFilterPanel({
     </motion.div>
   );
 }
+
