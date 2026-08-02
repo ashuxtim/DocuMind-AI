@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback } from 'react';
-import { Network, ZoomIn, ZoomOut, Maximize2, RefreshCw, Filter, BarChart2, Search } from 'lucide-react';
+import { Network, RefreshCw, Filter, BarChart2, Search } from 'lucide-react';
 import { useGraphData } from '@/hooks/useGraphData';
 import GraphExplorer from '@/components/graph/GraphExplorer';
 import { GraphFilterPanel } from '@/components/graph/GraphFilterPanel';
 import { GraphStatsPanel } from '@/components/graph/GraphStatsPanel';
+import { GraphControlsWidget } from '@/components/graph/GraphControlsWidget';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Badge } from '@/ui/badge';
@@ -222,8 +223,18 @@ export function GraphPage() {
         )}
       </div>
 
+      {/* ── Floating Camera Action Bar Widget (GitNexus Style) ── */}
+      {graph && !loading && !error && (
+        <GraphControlsWidget
+          onZoomIn={() => explorerRef.current?.zoomIn()}
+          onZoomOut={() => explorerRef.current?.zoomOut()}
+          onFitView={() => explorerRef.current?.fitView()}
+          onResetView={() => explorerRef.current?.fitView()}
+        />
+      )}
+
       {/* ── Floating Footer Hint Pill (GitNexus Style) ── */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none hidden sm:block">
         <div className="px-4 py-1.5 rounded-full bg-[#101018]/85 backdrop-blur-md border border-[#2a2a3a] shadow-lg">
           <p className="text-[11px] text-[#8888a0] font-mono text-center tracking-tight">
             Click to focus node · Search by name · Drag to pan · Scroll to zoom
@@ -233,4 +244,5 @@ export function GraphPage() {
     </div>
   );
 }
+
 
