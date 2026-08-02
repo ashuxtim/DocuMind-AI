@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback } from 'react';
-import { Network, RefreshCw, Filter, BarChart2, Search } from 'lucide-react';
+import { Network, RefreshCw, Filter, BarChart2 } from 'lucide-react';
 import { useGraphData } from '@/hooks/useGraphData';
 import GraphExplorer from '@/components/graph/GraphExplorer';
 import { GraphFilterPanel } from '@/components/graph/GraphFilterPanel';
 import { GraphStatsPanel } from '@/components/graph/GraphStatsPanel';
 import { GraphControlsWidget } from '@/components/graph/GraphControlsWidget';
+import { GraphSearchPalette } from '@/components/graph/GraphSearchPalette';
 import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
 import { Badge } from '@/ui/badge';
 
 const ALL_TYPES = ['Person', 'Organization', 'Statute', 'Date', 'Document', 'Entity'];
@@ -22,7 +22,6 @@ const NODE_COLORS = [
 
 export function GraphPage() {
   const { graph, loading, error, refetch, nodeCount, linkCount } = useGraphData();
-  const [searchValue, setSearchValue] = useState('');
   const [committedSearch, setCommittedSearch] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -31,12 +30,9 @@ export function GraphPage() {
   const [liveGraph, setLiveGraph] = useState(null);
   const explorerRef = useRef(null);
 
-  const handleSearchKeyDown = useCallback(
-    (e) => {
-      if (e.key === 'Enter') setCommittedSearch(searchValue);
-    },
-    [searchValue],
-  );
+  const handleSelectNodeFromSearch = useCallback((nodeId) => {
+    setCommittedSearch(nodeId);
+  }, []);
 
   const handleToggleType = useCallback((type) => {
     setActiveTypes((prev) => {
@@ -109,17 +105,12 @@ export function GraphPage() {
             {linkCount.toLocaleString()} <span className="text-[#8888a0] ml-1">edges</span>
           </Badge>
 
-          {/* Search Input */}
-          <div className="relative flex items-center">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 text-[#5a5a70] pointer-events-none" />
-            <Input
-              className="h-8 w-44 sm:w-56 text-xs pl-8 bg-[#0a0a10]/80 border-[#2a2a3a] text-[#e4e4ed] placeholder-[#5a5a70] focus:border-[#7c3aed] focus:ring-1 focus:ring-[#7c3aed] transition-all"
-              placeholder="Search nodes (Enter)..."
-              value={searchValue}
-              onChange={(e) => setSearchValue(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-            />
-          </div>
+          {/* Interactive Search Autocomplete Palette */}
+          <GraphSearchPalette
+            graph={liveGraph}
+            onSelectNode={handleSelectNodeFromSearch}
+          />
+
 
           {/* Filter Panel Toggle */}
           <div className="relative">
