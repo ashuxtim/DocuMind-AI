@@ -4,34 +4,34 @@
 
 @layer base {
   :root {
-    --background: 0 0% 4%; /* #0A0A0A */
-    --foreground: 0 0% 96%; /* #F5F5F5 */
-    
-    --card: 0 0% 7%; /* #121212 */
-    --card-foreground: 0 0% 96%;
-    
-    --popover: 0 0% 10%; /* #1A1A1A */
-    --popover-foreground: 0 0% 96%;
-    
-    --primary: 142 71% 45%; /* #10B981 Emerald */
+    --background: 240 25% 3%; /* #06060A Void */
+    --foreground: 240 22% 91%; /* #E4E4ED */
+
+    --card: 240 20% 8%; /* #101018 Surface */
+    --card-foreground: 240 22% 91%;
+
+    --popover: 240 17% 10%; /* #16161F Elevated */
+    --popover-foreground: 240 22% 91%;
+
+    --primary: 263 70% 58%; /* #7C3AED Accent Purple */
     --primary-foreground: 0 0% 100%;
-    
-    --secondary: 258 90% 66%; /* #8B5CF6 Purple */
-    --secondary-foreground: 0 0% 100%;
-    
-    --muted: 0 0% 16%; /* #2A2A2A */
-    --muted-foreground: 0 0% 45%; /* #737373 */
-    
-    --accent: 142 71% 45%; /* Emerald for accents */
+
+    --secondary: 240 17% 10%; /* #16161F */
+    --secondary-foreground: 240 22% 91%;
+
+    --muted: 240 16% 14%; /* #1E1E2A */
+    --muted-foreground: 240 11% 58%; /* #8888A0 */
+
+    --accent: 263 70% 58%;
     --accent-foreground: 0 0% 100%;
-    
-    --destructive: 0 84% 60%; /* #EF4444 Rose */
+
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    
-    --border: 0 0% 16%; /* #2A2A2A */
-    --input: 0 0% 16%;
-    --ring: 142 71% 45%; /* Emerald focus ring */
-    
+
+    --border: 240 16% 20%; /* #2A2A3A */
+    --input: 240 16% 20%;
+    --ring: 263 70% 58%;
+
     --radius: 0.5rem;
   }
 }
@@ -40,30 +40,46 @@
   * {
     @apply border-border;
   }
-  
+
   body {
-    @apply bg-background text-foreground;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    background-color: #06060a;
+    color: #e4e4ed;
+    font-family: 'Outfit', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-/* Custom scrollbar styling */
-::-webkit-scrollbar {
+/* GitNexus custom thin scrollbar */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a3a #0a0a10;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-::-webkit-scrollbar-track {
-  background: hsl(var(--background));
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #0a0a10;
 }
 
-::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted));
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #2a2a3a;
   border-radius: 4px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground));
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #5a5a70;
+}
+
+/* Glassmorphism panel utility */
+.glass-panel {
+  background-color: rgba(16, 16, 24, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid #2a2a3a;
 }
 
 /* Smooth transitions for interactive elements */
@@ -72,3 +88,4 @@
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
+
