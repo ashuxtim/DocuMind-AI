@@ -126,8 +126,28 @@ const SIGMA_SETTINGS = {
 const ANIM_DURATION = { search: 1200, click: 2000 };
 
 // ── Component ──────────────────────────────────────────────────────────────────
+// ── BFS: compute set of node IDs reachable within N hops from a root ──────────
+function bfsReachable(g, rootId, maxHops) {
+  if (!g || !rootId || !g.hasNode(rootId)) return null;
+  if (maxHops >= 4) return null; // 4+ means no restriction
+  const visited = new Map(); // nodeId → hop distance
+  const queue   = [{ id: rootId, depth: 0 }];
+  visited.set(rootId, 0);
+  while (queue.length > 0) {
+    const { id, depth } = queue.shift();
+    if (depth >= maxHops) continue;
+    g.forEachNeighbor(id, (neighbor) => {
+      if (!visited.has(neighbor)) {
+        visited.set(neighbor, depth + 1);
+        queue.push({ id: neighbor, depth: depth + 1 });
+      }
+    });
+  }
+  return visited;
+}
+
 const GraphExplorer = forwardRef(function GraphExplorer(
-  { graph, search, activeTypes, onTypeCounts, onGraphReady, onNodeSelect, onNodeHover, onLayoutChange },
+  { graph, search, activeTypes, onTypeCounts, onGraphReady, onNodeSelect, onNodeHover, onLayoutChange, depthFilter, activeEdgeTypes },
   ref,
 ) {
   const containerRef    = useRef(null);
@@ -136,7 +156,11 @@ const GraphExplorer = forwardRef(function GraphExplorer(
   const graphRef        = useRef(null);
   const hoveredNodeRef  = useRef(null);
   const selectedNodeRef = useRef(null);
-  const activeTypesRef  = useRef(activeTypes);
+  const activeTypesRef     = useRef(activeTypes);
+  const depthFilterRef      = useRef(depthFilter ?? 4);
+  const activeEdgeTypesRef  = useRef(activeEdgeTypes);
+  // Cached BFS result — recomputed when selection or depthFilter changes
+  const bfsReachableRef     = useRef(null);
 
   // Layout refs
   const layoutRef        = useRef(null);
@@ -324,10 +348,19 @@ const GraphExplorer = forwardRef(function GraphExplorer(
       nodeReducer: (node, data) => {
         const g   = graphRef.current;
         const res = { ...data };
+
+        // Node type visibility
         if (activeTypesRef.current && !activeTypesRef.current.has(data.group)) {
           res.hidden = true;
           return res;
         }
+
+        // Phase 4: Depth (BFS hop) filter — hide nodes beyond N hops from selection
+        if (bfsReachableRef.current && !bfsReachableRef.current.has(node)) {
+          res.hidden = true;
+          return res;
+        }
+
         const activeNode = selectedNodeRef.current;
         if (activeNode && g) {
           const isTarget   = node === activeNode;
@@ -346,6 +379,8 @@ const GraphExplorer = forwardRef(function GraphExplorer(
         const g = graphRef.current;
         if (!g) return { ...data };
         const res = { ...data };
+
+        // Node-type filter: hide edge if either endpoint type is off
         if (activeTypesRef.current) {
           const srcGroup = g.getNodeAttribute(g.source(edge), 'group');
           const tgtGroup = g.getNodeAttribute(g.target(edge), 'group');
@@ -354,6 +389,26 @@ const GraphExplorer = forwardRef(function GraphExplorer(
             return res;
           }
         }
+
+        // Phase 4: Edge type (label) filter
+        if (activeEdgeTypesRef.current && activeEdgeTypesRef.current.size > 0) {
+          const edgeLabel = data.label || '';
+          if (!activeEdgeTypesRef.current.has(edgeLabel)) {
+            res.hidden = true;
+            return res;
+          }
+        }
+
+        // Phase 4: Depth filter — hide edge if either endpoint is outside BFS set
+        if (bfsReachableRef.current) {
+          const src = g.source(edge);
+          const tgt = g.target(edge);
+          if (!bfsReachableRef.current.has(src) || !bfsReachableRef.current.has(tgt)) {
+            res.hidden = true;
+            return res;
+          }
+        }
+
         const activeNode = selectedNodeRef.current;
         if (activeNode) {
           const isConnected = g.source(edge) === activeNode || g.target(edge) === activeNode;
@@ -424,6 +479,7 @@ const GraphExplorer = forwardRef(function GraphExplorer(
 
     sigma.on('clickNode', ({ node }) => {
       selectedNodeRef.current = node;
+      bfsReachableRef.current = bfsReachable(graphRef.current, node, depthFilterRef.current);
       const g     = graphRef.current;
       const attrs = g && g.hasNode(node) ? g.getNodeAttributes(node) : {};
       const pos   = sigma.getNodeDisplayData(node);
@@ -487,6 +543,7 @@ const GraphExplorer = forwardRef(function GraphExplorer(
     });
     if (found) {
       selectedNodeRef.current = found;
+      bfsReachableRef.current = bfsReachable(g, found, depthFilterRef.current);
       const attrs = g.getNodeAttributes(found);
       const pos   = sigmaRef.current.getNodeDisplayData(found);
       if (pos) sigmaRef.current.getCamera().animate({ x: pos.x, y: pos.y, ratio: 0.15 }, { duration: 500 });
@@ -503,6 +560,24 @@ const GraphExplorer = forwardRef(function GraphExplorer(
     if (sigmaRef.current) sigmaRef.current.refresh();
   }, [activeTypes]);
 
+  // ── Phase 4: depthFilter + BFS cache sync ─────────────────────────────────
+  useEffect(() => {
+    depthFilterRef.current = depthFilter ?? 4;
+    // Recompute BFS when depth changes (selectedNode may already be set)
+    bfsReachableRef.current = bfsReachable(
+      graphRef.current,
+      selectedNodeRef.current,
+      depthFilterRef.current,
+    );
+    if (sigmaRef.current) sigmaRef.current.refresh();
+  }, [depthFilter]);
+
+  // ── Phase 4: activeEdgeTypes sync ─────────────────────────────────────────
+  useEffect(() => {
+    activeEdgeTypesRef.current = activeEdgeTypes;
+    if (sigmaRef.current) sigmaRef.current.refresh();
+  }, [activeEdgeTypes]);
+
   // ── Public API ─────────────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
     zoomIn()  { sigmaRef.current?.getCamera().animatedZoom({ duration: 200 }); },
@@ -514,7 +589,8 @@ const GraphExplorer = forwardRef(function GraphExplorer(
       if (pos) sigmaRef.current.getCamera().animate({ x: pos.x, y: pos.y, ratio: 0.15 }, { duration: 400 });
     },
     clearSelection() {
-      selectedNodeRef.current = null;
+      selectedNodeRef.current  = null;
+      bfsReachableRef.current  = null; // clear depth filter
       onNodeSelectRef.current?.(null, null, null, null);
       animationsRef.current = [];
       if (sigmaRef.current) {
