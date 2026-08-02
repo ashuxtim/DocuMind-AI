@@ -24,14 +24,14 @@ data:
   # Anthropic is explicit-only — auto-detect will never land on it.
 
   # ── NVIDIA — serves: primary, audit, router, structured extraction, embedding, reranker ──
-  LLM_PROVIDER: "nvidia"
-  PRIMARY_MODEL: "meta/llama-3.3-70b-instruct"         # primary
-  AUDIT_LLM_PROVIDER: "nvidia"
-  AUDIT_MODEL: "mistralai/mistral-small-4-119b-2603"   # audit
-  ROUTER_LLM_PROVIDER: "nvidia"
-  ROUTER_MODEL: "mistralai/mistral-small-4-119b-2603"  # router
-  STRUCTURED_LLM_PROVIDER: "nvidia"
-  STRUCTURED_MODEL: "qwen/qwen2.5-coder-32b-instruct"  # structured extraction
+  LLM_PROVIDER: "groq"
+  PRIMARY_MODEL: "openai/gpt-oss-120b"                  # primary
+  AUDIT_LLM_PROVIDER: "groq"
+  AUDIT_MODEL: "openai/gpt-oss-120b"                    # audit
+  ROUTER_LLM_PROVIDER: "groq"
+  ROUTER_MODEL: "openai/gpt-oss-120b"                   # router
+  STRUCTURED_LLM_PROVIDER: "groq"
+  STRUCTURED_MODEL: "openai/gpt-oss-120b"               # structured extraction
   NVIDIA_MODEL: "nvidia/llama-3.3-nemotron-super-49b-v1.5"  # nvidia fallback model
   EMBED_MODEL: "nvidia/nv-embed-v1"
   EMBED_DIM: "4096"                                    # embedding
@@ -52,13 +52,20 @@ data:
 
   # ── Context Window ──
   # Maximum document context chars passed to the LLM.
-  # Default 60K is safe for all providers including Groq (Qwen3-32B: ~24K char budget).
-  # Increase for providers with larger context windows:
+  # Active default: Groq openai/gpt-oss-120b — 131,072 token context, 65,536 token max output.
+  #   openai/gpt-oss-120b is a reasoning model: its hidden reasoning tokens are billed
+  #   against the same output budget as the visible answer, so actual output consumption
+  #   is unpredictable. Conservative fix: reserve the FULL documented max output
+  #   (65,536 tokens) as margin, not just the ~8,192 tokens our own generate() calls request.
+  #     Input budget = 131,072 - 65,536 = 65,536 tokens
+  #     Chars        = 65,536 tokens x 1.0 char/token (conservative 1:1 ratio — worst
+  #                    case for dense/tabular financial text, same ratio used below)
+  #                  = 65,536 chars -> rounded down to 65,000 for extra safety margin
+  # Reference values for other providers (not currently selected):
   #   NVIDIA nemotron-super (NIM API cap 256K tokens): up to ~190K chars
   #   Anthropic Sonnet 4.6 (200K tokens):              up to ~150K chars
   #   Gemini 2.5 Flash (1M tokens):                    up to ~750K chars
-  #   Groq Qwen3-32B (32K tokens):                     do not exceed ~20K chars
-  AGENT_MAX_CONTEXT_CHARS: "60000"
+  AGENT_MAX_CONTEXT_CHARS: "65000"
   QUERY_TIMEOUT_S: "300"
 
   # ── Retrieval Thresholds ──

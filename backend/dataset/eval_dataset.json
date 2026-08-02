@@ -1,0 +1,42 @@
+[
+  {
+    "question": "Who is the Chief Executive Officer of Solstice Meridian Group, and where did she previously work as Chief Technology Officer?",
+    "ground_truth": "Elena Voss is the Chief Executive Officer of Solstice Meridian Group. She previously served as Chief Technology Officer of Arkwell Dynamics for six years."
+  },
+  {
+    "question": "What enterprise value did Solstice Meridian Group pay for Ashgrove Robotics, and how was the consideration structured?",
+    "ground_truth": "Solstice Meridian Group paid an enterprise value of €340 million for Ashgrove Robotics, comprising €250 million in cash and €90 million in newly issued Solstice Meridian shares."
+  },
+  {
+    "question": "Who founded Ashgrove Robotics, and what role does he hold at Solstice Meridian Group following the acquisition?",
+    "ground_truth": "Victor Palladino founded Ashgrove Robotics in 2014. Following the acquisition, he joined Solstice Meridian Group as Senior Vice President of Robotics, reporting to Chief Operating Officer Priya Anand."
+  },
+  {
+    "question": "Which Solstice Meridian Group board member also serves as Chief Executive Officer of a strategic partner company, and which company is it?",
+    "ground_truth": "Fatima Al-Sayed is an independent director of Solstice Meridian Group and also serves as Chief Executive Officer of Al-Sayed Renewable Ventures, the Group's strategic partner for solar-storage integration in the Middle East."
+  },
+  {
+    "question": "Who chairs the Audit Committee, and what related-party matter does the committee review annually?",
+    "ground_truth": "Thomas Nakagawa chairs the Audit Committee. Because Fatima Al-Sayed serves both as an independent director of Solstice Meridian Group and as CEO of partner company Al-Sayed Renewable Ventures, the Audit Committee reviews that relationship annually for related-party considerations."
+  },
+  {
+    "question": "What was Solstice Meridian Group's total revenue in Q3 2026, and what was the year-over-year growth rate?",
+    "ground_truth": "Solstice Meridian Group's revenue in Q3 2026 was €612.4 million, up 21.4% year-over-year from €504.4 million in Q3 2025."
+  },
+  {
+    "question": "Which business segment generated the most revenue in Q3 2026, and who leads it?",
+    "ground_truth": "Industrial Automation generated the most revenue in Q3 2026 at €241.8 million, led by Derek Osei."
+  },
+  {
+    "question": "What contract did the Baltic Grid Authority award to Solstice Meridian Group, and which division led the engagement?",
+    "ground_truth": "The Baltic Grid Authority awarded Solstice Meridian Group a 400-megawatt battery storage contract valued at €146 million over four years, led by Camille Fontaine's Renewable Energy Systems division."
+  },
+  {
+    "question": "What percentage of Group revenue is exposed to non-euro currencies, and what is the primary driver of that exposure following the Ashgrove acquisition?",
+    "ground_truth": "Approximately 34% of Group revenue is denominated in non-euro currencies, primarily Canadian dollars following the Ashgrove Robotics acquisition, along with Vietnamese dong and Gulf currencies linked to the Al-Sayed Renewable Ventures partnership."
+  },
+  {
+    "question": "What quarterly dividend did the Board approve, and when is it payable?",
+    "ground_truth": "The Board approved a quarterly dividend of €0.42 per share, payable on 20 November 2026 to shareholders of record as of 6 November 2026."
+  }
+]

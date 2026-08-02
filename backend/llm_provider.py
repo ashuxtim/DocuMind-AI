@@ -350,7 +350,7 @@ def _init_llm_provider(prefix: str = "") -> LLMProvider:
                 "GROQ_API_KEY is required when LLM_PROVIDER=groq. "
                 "Add it to backend/.env and run: make secrets"
             )
-        model = model_override or os.getenv("GROQ_MODEL")
+        model = model_override or os.getenv("PRIMARY_MODEL") or os.getenv("GROQ_MODEL")
         if not model:
             raise RuntimeError(
                 "GROQ_MODEL must be set when LLM_PROVIDER=groq. "
@@ -365,7 +365,7 @@ def _init_llm_provider(prefix: str = "") -> LLMProvider:
                 "OPENAI_API_KEY is required when LLM_PROVIDER=openai. "
                 "Add it to backend/.env and run: make secrets"
             )
-        model = model_override or os.getenv("OPENAI_MODEL")
+        model = model_override or os.getenv("PRIMARY_MODEL") or os.getenv("OPENAI_MODEL")
         if not model:
             raise RuntimeError(
                 "OPENAI_MODEL must be set when LLM_PROVIDER=openai. "
@@ -380,7 +380,7 @@ def _init_llm_provider(prefix: str = "") -> LLMProvider:
                 "GEMINI_API_KEY is required when LLM_PROVIDER=gemini. "
                 "Add it to backend/.env and run: make secrets"
             )
-        model = model_override or os.getenv("GEMINI_MODEL")
+        model = model_override or os.getenv("PRIMARY_MODEL") or os.getenv("GEMINI_MODEL")
         if not model:
             raise RuntimeError(
                 "GEMINI_MODEL must be set when LLM_PROVIDER=gemini. "
@@ -395,7 +395,7 @@ def _init_llm_provider(prefix: str = "") -> LLMProvider:
                 "ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic. "
                 "Add it to backend/.env and run: make secrets"
             )
-        model = model_override or os.getenv("ANTHROPIC_MODEL")
+        model = model_override or os.getenv("PRIMARY_MODEL") or os.getenv("ANTHROPIC_MODEL")
         if not model:
             raise RuntimeError(
                 "ANTHROPIC_MODEL must be set when LLM_PROVIDER=anthropic. "

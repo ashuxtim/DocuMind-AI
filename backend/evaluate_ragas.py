@@ -85,129 +85,21 @@ judge_embeddings = NVIDIAEmbeddings(
 )
 
 # ── Ground Truth Dataset ────────────────────────────────────────────────────
-EVAL_DATASET = [
-    {
-        "question": (
-            "A Data Subject who is an EU client has formally exercised their "
-            "right to erasure under the European privacy framework. Their records "
-            "are 6 years old and are subject to FCA SYSC 9.1 record-keeping "
-            "requirements. Must Meridian delete these records? If not, who holds "
-            "the decision authority, what is the applicable exception, and what "
-            "is the interim guidance currently in force?"
-        ),
-        "ground_truth": (
-            "Meridian must not delete the records. The applicable exception is "
-            "Article 17(3)(b) of the GDPR, which permits retention when necessary "
-            "to comply with a legal obligation — specifically FCA SYSC 9.1. "
-            "Addendum 2.1(d) mandates this outcome and no discretionary authority "
-            "is required. The interim guidance states that for records under seven "
-            "years old subject to FCA SYSC 9.1, erasure requests under GDPR "
-            "Article 17 must be declined on the basis of the Article 17(3)(b) "
-            "exception."
-        ),
-    },
-    {
-        "question": (
-            "Meridian's newly incorporated Singapore subsidiary needs a regulatory "
-            "addendum. Who is responsible for preparing it, what is the deadline, "
-            "and if MAS regulations conflict with the existing Framework, which "
-            "regulatory hierarchy rule applies — and is there a gap in the current "
-            "Framework regarding this?"
-        ),
-        "ground_truth": (
-            "The Legal Division is responsible for preparing the Singapore-specific "
-            "regulatory addendum (Addendum 2.2), with a deadline of June 30, 2024. "
-            "If MAS regulations conflict with the Framework, Section 1.2(c) applies "
-            "by extension: mandatory statutory requirements in a jurisdiction prevail "
-            "over conflicting Framework provisions. There is a documented gap: "
-            "Framework v4.2 does not address Singapore's Securities and Futures Act "
-            "2001 or MAS regulations, which Addendum 2.1(c) explicitly notes require "
-            "separate treatment through the new addendum."
-        ),
-    },
-    {
-        "question": (
-            "At what transaction value does Tier 3 data classification require "
-            "mandatory data custodian designation, and how does this interact with "
-            "the Applicable Threshold formula in Section 6.4? If the floor in "
-            "Annex III paragraph 7 and the ceiling in Annex III paragraph 8 produce "
-            "a conflict for a specific transaction type, who must be notified, "
-            "within what timeframe, and which external firm must be engaged?"
-        ),
-        "ground_truth": (
-            "Tier 3 data classification requires mandatory data custodian designation "
-            "for transactions exceeding $10,000 under Section 3.3. This threshold "
-            "operates independently of the Applicable Threshold formula in Section 6.4, "
-            "which is calculated as the Firm's Tier 1 capital base multiplied by a "
-            "transaction-category coefficient from Annex III, subject to a floor of "
-            "£500,000 (Annex III paragraph 7) and a ceiling of £50,000,000 (Annex III "
-            "paragraph 8). If the floor and ceiling produce a conflict for a specific "
-            "transaction type, the Risk Team must be notified. The Framework does not "
-            "specify a notification timeframe for this conflict and does not mandate "
-            "engagement of an external firm — escalation is internal to the Risk Team."
-        ),
-    },
-    {
-        "question": (
-            "According to the Merger Agreement, when does ownership of the DCA-7 "
-            "algorithm transfer to MHCH? Identify and explain the direct contradiction "
-            "between Section 2.2 and Section 8.3 on this question, and state what "
-            "interim arrangement was agreed to bridge this conflict."
-        ),
-        "ground_truth": (
-            "Section 2.2 states that all IP including the DCA-7 algorithm transfers "
-            "to MHCH automatically and immediately upon closing pursuant to Article VII "
-            "Section 7.1(a) of the Merger Agreement. Section 8.3 directly contradicts "
-            "this by requiring a minimum 90-day (and potentially up to 180-day) ITAR "
-            "regulatory review by the Directorate of Defense Trade Controls before the "
-            "DCA-7 transfer can be completed. The interim arrangement agreed to bridge "
-            "this conflict is the IP Bridge Agreement, which grants MHCH an operational "
-            "license to use the DCA-7 algorithm during the ITAR regulatory review period "
-            "pending formal ownership transfer."
-        ),
-    },
-    {
-        "question": (
-            "The Executive Summary states the transaction represents a multiple of "
-            "8.7x TTM EBITDA. Section 4.2 calculates TTM EBITDA as $13,045,000. "
-            "At a transaction value of $175,000,000, what is the actual multiple, "
-            "and what explains the discrepancy between this figure and the 8.7x "
-            "stated in Section 1?"
-        ),
-        "ground_truth": (
-            "The actual EBITDA multiple is approximately 13.4x, calculated as "
-            "$175,000,000 divided by $13,045,000. Section 4.2 itself states this "
-            "figure explicitly: the enterprise value represents a multiple of "
-            "approximately 13.4x TTM EBITDA, which is at the upper end but within "
-            "the range of comparable transactions. The 8.7x figure stated in the "
-            "Executive Summary in Section 1 is factually incorrect given the TTM "
-            "EBITDA calculation in Section 4.2 and the $175M transaction value. "
-            "The document does not explain the basis for the 8.7x figure."
-        ),
-    },
-    {
-        "question": (
-            "The DCA-7 algorithm is subject to both active litigation and an ITAR "
-            "regulatory challenge. What is the total escrow amount reserved "
-            "specifically for these two risks, who holds the escrow, who represents "
-            "Vantage Systems in the litigation, and what is the post-closing role "
-            "of the person responsible for the algorithm's legal defense?"
-        ),
-        "ground_truth": (
-            "The total escrow reserved for the two DCA-7 risks is $7,000,000: "
-            "$5,000,000 in IP Regulatory Escrow for the ITAR challenge and "
-            "$2,000,000 in Litigation Reserve for the DataBridge Holdings litigation. "
-            "The escrow is held by Riverside Trust & Escrow Services, LLC. "
-            "Vantage Systems is represented in the DataBridge litigation by "
-            "Drakewood & Finch LLP, specifically partner Ms. Isabelle Drakewood-Chen, "
-            "Esq. The person responsible for the algorithm's legal defense is "
-            "Mr. James Wellbrook, Vantage's General Counsel, whose post-closing role "
-            "is a 90-day transition period at his current compensation rate to assist "
-            "with contract assignment, pending litigation, and legal documentation "
-            "handover to MHCH's in-house legal team."
-        ),
-    },
-]
+EVAL_DATASET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dataset", "eval_dataset.json")
+
+
+def _load_hardcoded_eval_dataset() -> list[dict]:
+    """Load the fallback ground-truth dataset (question/ground_truth pairs) from disk."""
+    if not os.path.exists(EVAL_DATASET_PATH):
+        raise RuntimeError(
+            f"Eval dataset not found at {EVAL_DATASET_PATH}. "
+            "Expected a JSON array of {\"question\": ..., \"ground_truth\": ...} objects."
+        )
+    with open(EVAL_DATASET_PATH, "r") as f:
+        return json.load(f)
+
+
+EVAL_DATASET = _load_hardcoded_eval_dataset()
 
 
 # ── Dynamic dataset generation / persistence ─────────────────────────────────
