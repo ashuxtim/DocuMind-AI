@@ -1,6 +1,6 @@
 import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { Sigma } from 'sigma';
-import { EdgeArrowProgram } from 'sigma/rendering';
+import EdgeCurveProgram from '@sigma/edge-curve';
 
 // Color manipulation helpers matching GitNexus
 const hexToRgb = (hex) => {
@@ -60,8 +60,11 @@ const SIGMA_SETTINGS = {
   defaultNodeColor: '#94A3B8',
   defaultEdgeColor: '#2a2a3a',
 
-  defaultEdgeType: 'arrow',
-  edgeProgramClasses: { arrow: EdgeArrowProgram },
+  defaultEdgeType: 'curved',
+  edgeProgramClasses: {
+    curved: EdgeCurveProgram,
+  },
+
 
   // Custom GitNexus hover card renderer - dark pill with colored border & glow ring
   defaultDrawNodeHover: (context, data, settings) => {

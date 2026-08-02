@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { MultiGraph } from 'graphology';
 import { assign as forceAtlas2Assign } from 'graphology-layout-forceatlas2';
+import noverlap from 'graphology-layout-noverlap';
 import { getGraph } from '@/lib/api';
 
 const COLOR_MAP = {
@@ -12,9 +13,17 @@ const COLOR_MAP = {
   Entity: '#94A3B8',
 };
 
+// Refined base node size formula matching GitNexus scale (4px to 16px)
 function nodeSize(degree) {
-  return Math.max(5, Math.min(30, 5 + Math.log(degree + 1) * 6));
+  return Math.max(4, Math.min(16, 4 + Math.log(degree + 1) * 3));
 }
+
+const NOVERLAP_SETTINGS = {
+  maxIterations: 25,
+  ratio: 1.1,
+  margin: 10,
+  expansion: 1.05,
+};
 
 export function useGraphData() {
   const [graph, setGraph] = useState(null);
@@ -47,27 +56,31 @@ export function useGraphData() {
         if (g.hasNode(link.source) && g.hasNode(link.target)) {
           g.addEdge(link.source, link.target, {
             label: link.label ?? '',
-            color: 'rgba(148, 163, 184, 0.4)',
+            color: '#2a2a3a',
             size: 1,
           });
         }
       });
 
-      // Run ForceAtlas2 synchronously before sigma mounts so nodes have real positions
+      // Run ForceAtlas2 + Noverlap anti-collision matching GitNexus graph distribution
       if (g.order > 0) {
         forceAtlas2Assign(g, {
-          iterations: 500,
+          iterations: 300,
           settings: {
-            gravity: 0.05,
-            scalingRatio: 10,
+            gravity: 0.3,
+            scalingRatio: 30,
+            slowDown: 2,
             strongGravityMode: false,
             barnesHutOptimize: true,
-            barnesHutTheta: 0.5,
+            barnesHutTheta: 0.6,
             adjustSizes: true,
             linLogMode: false,
             outboundAttractionDistribution: true,
           },
         });
+
+        // Anti-collision pass to eliminate node overlap in dense entity clusters
+        noverlap.assign(g, NOVERLAP_SETTINGS);
       }
 
       setGraph(g);
@@ -86,3 +99,4 @@ export function useGraphData() {
 
   return { graph, loading, error, refetch: fetchData, nodeCount, linkCount };
 }
+
