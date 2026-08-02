@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import { Network, ZoomIn, ZoomOut, Maximize2, RefreshCw, Filter, BarChart2 } from 'lucide-react';
+import { Network, ZoomIn, ZoomOut, Maximize2, RefreshCw, Filter, BarChart2, Search } from 'lucide-react';
 import { useGraphData } from '@/hooks/useGraphData';
 import GraphExplorer from '@/components/graph/GraphExplorer';
 import { GraphFilterPanel } from '@/components/graph/GraphFilterPanel';
@@ -55,7 +55,6 @@ export function GraphPage() {
   }, []);
 
   const handleHideAll = useCallback(() => {
-    // Keep only the type with the most nodes
     const mostConnected =
       Object.entries(typeCounts).sort(([, a], [, b]) => b - a)[0]?.[0] ?? 'Entity';
     setActiveTypes(new Set([mostConnected]));
@@ -68,151 +67,129 @@ export function GraphPage() {
   const hiddenCount = ALL_TYPES.length - activeTypes.size;
 
   return (
-    <div className="flex flex-col h-full bg-background">
-      {/* ── Header ── */}
-      <div className="flex-none border-b border-border px-4 py-3">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          {/* Title */}
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
-              <Network className="w-4 h-4 text-primary" />
-            </div>
-            <div>
-              <h1 className="text-sm font-semibold text-foreground leading-tight">
-                Knowledge Graph
-              </h1>
-              <p className="text-xs text-muted-foreground leading-tight">
-                Explore entities and relationships
-              </p>
-            </div>
+    <div className="relative w-full h-full overflow-hidden bg-[#06060a]">
+      {/* ── Floating Header Navigation Bar (GitNexus Style) ── */}
+      <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-[#101018]/85 backdrop-blur-md border border-[#2a2a3a] shadow-glass flex-wrap">
+        {/* Brand & Title */}
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#7c3aed]/20 border border-[#7c3aed]/40">
+            <Network className="w-4 h-4 text-[#7c3aed]" />
           </div>
-
-          {/* Color legend */}
-          <div className="flex items-center gap-3 flex-wrap">
-            {NODE_COLORS.map(({ label, color }) => (
-              <span key={label} className="flex items-center gap-1 text-xs text-muted-foreground">
-                <span
-                  className="inline-block w-2 h-2 rounded-full flex-none"
-                  style={{ backgroundColor: color }}
-                />
-                {label}
-              </span>
-            ))}
+          <div>
+            <h1 className="text-sm font-semibold text-[#e4e4ed] leading-tight font-sans tracking-wide">
+              Knowledge Graph
+            </h1>
+            <p className="text-[11px] text-[#8888a0] leading-tight font-sans">
+              DocuMind Entity Network
+            </p>
           </div>
+        </div>
 
-          {/* Controls */}
-          <div className="flex items-center gap-2">
-            {/* Stats badges */}
-            <Badge variant="secondary" className="text-xs tabular-nums">
-              {nodeCount.toLocaleString()} nodes
-            </Badge>
-            <Badge variant="secondary" className="text-xs tabular-nums">
-              {linkCount.toLocaleString()} edges
-            </Badge>
+        {/* Node Types Color Legend Pill Bar */}
+        <div className="hidden lg:flex items-center gap-3 px-3 py-1.5 rounded-lg bg-[#0a0a10]/60 border border-[#1e1e2a]">
+          {NODE_COLORS.map(({ label, color }) => (
+            <span key={label} className="flex items-center gap-1.5 text-xs text-[#8888a0] font-sans">
+              <span
+                className="inline-block w-2 h-2 rounded-full flex-none shadow-[0_0_8px_rgba(0,0,0,0.5)]"
+                style={{ backgroundColor: color }}
+              />
+              {label}
+            </span>
+          ))}
+        </div>
 
-            {/* Search */}
+        {/* Controls & Metrics */}
+        <div className="flex items-center gap-2">
+          {/* Stats Badges */}
+          <Badge variant="outline" className="bg-[#0a0a10]/80 border-[#2a2a3a] text-[#e4e4ed] text-xs font-mono tabular-nums">
+            {nodeCount.toLocaleString()} <span className="text-[#8888a0] ml-1">nodes</span>
+          </Badge>
+          <Badge variant="outline" className="bg-[#0a0a10]/80 border-[#2a2a3a] text-[#e4e4ed] text-xs font-mono tabular-nums">
+            {linkCount.toLocaleString()} <span className="text-[#8888a0] ml-1">edges</span>
+          </Badge>
+
+          {/* Search Input */}
+          <div className="relative flex items-center">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 text-[#5a5a70] pointer-events-none" />
             <Input
-              className="h-7 w-48 text-xs"
-              placeholder="Search nodes…"
+              className="h-8 w-44 sm:w-56 text-xs pl-8 bg-[#0a0a10]/80 border-[#2a2a3a] text-[#e4e4ed] placeholder-[#5a5a70] focus:border-[#7c3aed] focus:ring-1 focus:ring-[#7c3aed] transition-all"
+              placeholder="Search nodes (Enter)..."
               value={searchValue}
               onChange={(e) => setSearchValue(e.target.value)}
               onKeyDown={handleSearchKeyDown}
             />
-
-            {/* Filter panel toggle */}
-            <div className="relative">
-              <Button
-                variant={filterOpen ? 'default' : 'outline'}
-                size="icon"
-                className="h-7 w-7"
-                title="Filter by type"
-                onClick={() => setFilterOpen((o) => !o)}
-              >
-                <Filter className="w-3.5 h-3.5" />
-              </Button>
-              {hiddenCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex items-center justify-center
-                                 w-3.5 h-3.5 rounded-full bg-destructive text-[9px] font-bold
-                                 text-destructive-foreground leading-none pointer-events-none">
-                  {hiddenCount}
-                </span>
-              )}
-            </div>
-
-            {/* Stats panel toggle */}
-            <Button
-              variant={statsOpen ? 'default' : 'outline'}
-              size="icon"
-              className="h-7 w-7"
-              title="Graph statistics"
-              onClick={() => setStatsOpen((o) => !o)}
-            >
-              <BarChart2 className="w-3.5 h-3.5" />
-            </Button>
-
-            {/* Camera controls */}
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              title="Zoom in"
-              onClick={() => explorerRef.current?.zoomIn()}
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              title="Zoom out"
-              onClick={() => explorerRef.current?.zoomOut()}
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              title="Fit view"
-              onClick={() => explorerRef.current?.fitView()}
-            >
-              <Maximize2 className="w-3.5 h-3.5" />
-            </Button>
-
-            {/* Refetch */}
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              title="Reload graph"
-              onClick={refetch}
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </Button>
           </div>
+
+          {/* Filter Panel Toggle */}
+          <div className="relative">
+            <Button
+              variant={filterOpen ? 'default' : 'outline'}
+              size="icon"
+              className={`h-8 w-8 rounded-lg border-2 font-medium transition-all ${
+                filterOpen
+                  ? 'bg-[#7c3aed] text-white border-[#7c3aed] shadow-[0_0_12px_rgba(124,58,237,0.4)]'
+                  : 'bg-[#0a0a10]/80 border-[#2a2a3a] text-[#e4e4ed] hover:bg-[#1c1c28] hover:border-[#7c3aed]/50'
+              }`}
+              title="Filter by entity type"
+              onClick={() => setFilterOpen((o) => !o)}
+            >
+              <Filter className="w-3.5 h-3.5" />
+            </Button>
+            {hiddenCount > 0 && (
+              <span className="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 rounded-full bg-[#ef4444] text-[10px] font-bold text-white leading-none shadow-md">
+                {hiddenCount}
+              </span>
+            )}
+          </div>
+
+          {/* Stats Panel Toggle */}
+          <Button
+            variant={statsOpen ? 'default' : 'outline'}
+            size="icon"
+            className={`h-8 w-8 rounded-lg border transition-all ${
+              statsOpen
+                ? 'bg-[#7c3aed] text-white border-[#7c3aed] shadow-[0_0_12px_rgba(124,58,237,0.4)]'
+                : 'bg-[#0a0a10]/80 border-[#2a2a3a] text-[#e4e4ed] hover:bg-[#1c1c28] hover:border-[#7c3aed]/50'
+            }`}
+            title="Graph statistics"
+            onClick={() => setStatsOpen((o) => !o)}
+          >
+            <BarChart2 className="w-3.5 h-3.5" />
+          </Button>
+
+          {/* Refetch Button */}
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 rounded-lg bg-[#0a0a10]/80 border-[#2a2a3a] text-[#e4e4ed] hover:bg-[#1c1c28] hover:border-[#7c3aed]/50 transition-all"
+            title="Reload graph"
+            onClick={refetch}
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </Button>
         </div>
       </div>
 
-      {/* ── Canvas area ── */}
-      <div className="flex-1 relative min-h-0">
+      {/* ── 100% Full-Viewport Graph Canvas Container ── */}
+      <div className="w-full h-full absolute inset-0">
         {loading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-background">
-            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm text-muted-foreground">Loading knowledge graph…</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-30 bg-[#06060a]/90 backdrop-blur-md">
+            <div className="w-9 h-9 border-2 border-[#7c3aed] border-t-transparent rounded-full animate-spin shadow-[0_0_20px_rgba(124,58,237,0.4)]" />
+            <p className="text-xs font-mono text-[#8888a0]">Initializing Knowledge Graph...</p>
           </div>
         )}
 
         {error && !loading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10 bg-background">
-            <p className="text-sm text-destructive">{error}</p>
-            <Button variant="outline" size="sm" onClick={refetch}>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-30 bg-[#06060a]/90 backdrop-blur-md">
+            <p className="text-sm text-[#ef4444] font-medium">{error}</p>
+            <Button variant="outline" size="sm" onClick={refetch} className="bg-[#101018] border-[#2a2a3a] text-[#e4e4ed] hover:bg-[#1c1c28]">
               <RefreshCw className="w-3.5 h-3.5 mr-2" />
-              Retry
+              Retry Connection
             </Button>
           </div>
         )}
 
-        {/* Filter panel — positioned over the graph, slides in from the left */}
+        {/* Filter Panel (Slide-over) */}
         <GraphFilterPanel
           isOpen={filterOpen}
           onClose={() => setFilterOpen(false)}
@@ -223,14 +200,14 @@ export function GraphPage() {
           typeCounts={typeCounts}
         />
 
-        {/* Stats panel — positioned over the graph, slides in from the right */}
+        {/* Stats Panel (Slide-over) */}
         <GraphStatsPanel
           isOpen={statsOpen}
           onClose={() => setStatsOpen(false)}
           graph={liveGraph}
         />
 
-        {/* Sigma needs a real pixel height — ensure parent chain has h-full */}
+        {/* Graph Explorer Canvas */}
         {graph && !loading && !error && (
           <div className="w-full h-full">
             <GraphExplorer
@@ -245,12 +222,15 @@ export function GraphPage() {
         )}
       </div>
 
-      {/* ── Footer hint ── */}
-      <div className="flex-none border-t border-border px-4 py-1.5">
-        <p className="text-xs text-muted-foreground text-center">
-          Click to focus · Search by name · Drag to pan · Scroll to zoom
-        </p>
+      {/* ── Floating Footer Hint Pill (GitNexus Style) ── */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+        <div className="px-4 py-1.5 rounded-full bg-[#101018]/85 backdrop-blur-md border border-[#2a2a3a] shadow-lg">
+          <p className="text-[11px] text-[#8888a0] font-mono text-center tracking-tight">
+            Click to focus node · Search by name · Drag to pan · Scroll to zoom
+          </p>
+        </div>
       </div>
     </div>
   );
 }
+
